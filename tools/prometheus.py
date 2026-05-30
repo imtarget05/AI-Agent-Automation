@@ -5,16 +5,18 @@ Supports real connection with a robust mock fallback for stable local demos.
 
 import logging
 import httpx
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 class PrometheusTool:
     """Tool class for querying Prometheus metric storage"""
 
-    def __init__(self, prometheus_url: str = "http://localhost:9090"):
-        self.prometheus_url = prometheus_url.rstrip('/')
+    def __init__(self, prometheus_url: Optional[str] = None):
+        self.prometheus_url = (prometheus_url or get_settings().prometheus_url).rstrip('/')
         self.api_endpoint = f"{self.prometheus_url}/api/v1/query"
 
     async def query_metric(self, query: str, time: Optional[str] = None) -> Dict[str, Any]:

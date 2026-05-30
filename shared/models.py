@@ -13,6 +13,15 @@ class ModuleType(str, Enum):
     COMPUTER_USE = "computer_use"
     BROWSER = "browser"
     SOCIAL = "social"
+    
+    RAG = "rag"
+    AIOPS = "aiops"
+    RCA = "rca"
+    DEVOPS = "devops"
+    EMAIL = "email"
+    TOOL = "tool"
+    GUARDRAIL = "guardrail"
+    REPORT = "report"
 
 
 class TaskStatus(str, Enum):

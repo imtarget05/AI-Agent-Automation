@@ -63,7 +63,7 @@ class MetricRecord(Base):
     error_type = Column(String, nullable=True)
     error_message = Column(String, nullable=True)
     
-    metadata = Column(JSON, nullable=True)
+    metric_metadata = Column("metadata", JSON, nullable=True)
 
 
 class DailyMetricRecord(Base):
@@ -133,7 +133,7 @@ def _to_metric_record(metric: MetricData) -> MetricRecord:
         message_type=metric.message_type,
         error_type=metric.error_type,
         error_message=metric.error_message,
-        metadata=metric.metadata,
+        metric_metadata=metric.metadata,
     )
 
 
@@ -156,27 +156,7 @@ async def collect_metric(
     for analysis and aggregation.
     """
     try:
-        record = MetricRecord(
-            metric_type=metric.metric_type.value,
-            timestamp=metric.timestamp,
-            endpoint=metric.endpoint,
-            method=metric.method,
-            status_code=metric.status_code,
-            response_time_ms=metric.response_time_ms,
-            agent_type=metric.agent_type.value if metric.agent_type else None,
-            task_id=metric.task_id,
-            task_status=metric.task_status.value if metric.task_status else None,
-            task_duration_ms=metric.task_duration_ms,
-            model_name=metric.model_name,
-            input_tokens=metric.input_tokens,
-            output_tokens=metric.output_tokens,
-            cost_usd=metric.cost_usd,
-            platform=metric.platform,
-            message_type=metric.message_type,
-            error_type=metric.error_type,
-            error_message=metric.error_message,
-            metadata=metric.metadata
-        )
+        record = _to_metric_record(metric)
         db.add(record)
         db.commit()
         logger.info(f"Collected metric: {metric.metric_type}")
@@ -194,28 +174,7 @@ async def collect_metrics_batch(
     """Batch collect multiple metrics"""
     try:
         for metric in metrics:
-            record = MetricRecord(
-                metric_type=metric.metric_type.value,
-                timestamp=metric.timestamp,
-                endpoint=metric.endpoint,
-                method=metric.method,
-                status_code=metric.status_code,
-                response_time_ms=metric.response_time_ms,
-                agent_type=metric.agent_type.value if metric.agent_type else None,
-                task_id=metric.task_id,
-                task_status=metric.task_status.value if metric.task_status else None,
-                task_duration_ms=metric.task_duration_ms,
-                model_name=metric.model_name,
-                input_tokens=metric.input_tokens,
-                output_tokens=metric.output_tokens,
-                cost_usd=metric.cost_usd,
-                platform=metric.platform,
-                message_type=metric.message_type,
-                error_type=metric.error_type,
-                error_message=metric.error_message,
-                metadata=metric.metadata
-            )
-            db.add(record)
+            db.add(_to_metric_record(metric))
         db.commit()
         logger.info(f"Batch recorded {len(metrics)} metrics")
         return {"status": "success", "count": len(metrics)}
@@ -241,7 +200,7 @@ async def get_daily_metrics(
         # Check if cached
         cached = db.query(DailyMetricRecord).filter_by(date=date).first()
         if cached:
-            return DailyMetrics(**json.loads(cached.data))
+            return DailyMetrics(**_json_object(cached.data))
         
         # Calculate from raw metrics
         start = datetime.strptime(date, "%Y-%m-%d")
@@ -322,7 +281,7 @@ async def get_daily_metrics(
         # Cache the result
         record = DailyMetricRecord(
             date=date,
-            data=json.loads(daily.json())
+            data=daily.model_dump(mode="json")
         )
         db.merge(record)
         db.commit()
@@ -348,7 +307,7 @@ async def get_monthly_metrics(
         # Check cache
         cached = db.query(MonthlyMetricRecord).filter_by(year_month=year_month).first()
         if cached:
-            return MonthlyMetrics(**json.loads(cached.data))
+            return MonthlyMetrics(**_json_object(cached.data))
         
         # Get all days in month
         year, month = year_month.split("-")
@@ -416,7 +375,7 @@ async def get_monthly_metrics(
         # Cache
         record = MonthlyMetricRecord(
             year_month=year_month,
-            data=json.loads(monthly.json())
+            data=monthly.model_dump(mode="json")
         )
         db.merge(record)
         db.commit()

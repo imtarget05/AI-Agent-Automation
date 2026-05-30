@@ -70,8 +70,8 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 
 #### 2.1 Xây dựng Tool Registry & Expose APIs (`tools/`)
 Để Agent không gây lỗi bảo mật, toàn bộ các công cụ (Tools) phải được đóng gói thành các dịch vụ API chuẩn hóa hoặc tích hợp giao thức **MCP (Model Context Protocol)**:
-- [ ] **2.1.1 `k8s-tool`**: Expose các API an toàn: `get_pods`, `get_logs`, `get_events`, `describe_pod`. Ngăn chặn việc xóa/sửa nếu không có quyền Admin.
-- [ ] **2.1.2 `prometheus-tool`**: API tiếp nhận câu lệnh PromQL, truy vấn tài nguyên CPU/RAM, lỗi hệ thống hoặc latency của các service mục tiêu.
+- [x] **2.1.1 `k8s-tool`**: Expose các API an toàn: `get_pods`, `get_logs`, `get_events`, `describe_pod`. Ngăn chặn việc xóa/sửa nếu không có quyền Admin.
+- [x] **2.1.2 `prometheus-tool`**: API tiếp nhận câu lệnh PromQL, truy vấn tài nguyên CPU/RAM, lỗi hệ thống hoặc latency của các service mục tiêu.
 - [ ] **2.1.3 `log-tool`**: Trình tìm kiếm và lọc logs nâng cao từ file log hệ thống hoặc các hệ thống lưu trữ tập trung.
 - [ ] **2.1.4 `github-tool` / `git-tool`**: Tự động hóa việc đọc Git diff, tạo pull request (PR) commit sửa lỗi hoặc tạo GitHub Issue để theo dõi incident.
 - [x] **2.1.5 `email-tool`**: Tool cấp thấp để gửi email, tạo nháp, đính kèm báo cáo sự cố qua SMTP / Gmail API / SendGrid / AWS SES (Priority P1).
@@ -97,10 +97,10 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 *Mục tiêu: Đảm bảo Agent vận hành an toàn trong môi trường doanh nghiệp. Kiểm soát hành vi nguy hiểm, đo lường độ chính xác và giám sát toàn diện.*
 
 #### 3.1 Hệ thống An toàn & Giám sát Tác vụ (Safety & Guardrails)
-- [x] **3.1.1 Triển khai `guardrail-service`**:
+- [ ] **3.1.1 Triển khai `guardrail-service`**:
   - [x] **Input Guardrail**: Quét prompt đầu vào của người dùng chống Prompt Injection (nhồi lệnh độc hại).
   - [x] **Tool Guardrail**: Kiểm soát chặt chẽ các công cụ có tính phá hủy (ví dụ: Lệnh Shell, scale down pod K8s).
-  - [x] Thiết lập cơ chế **Human-in-the-loop (Chờ con người phê duyệt)** thông qua cổng Gateway trước khi Agent thực thi các tool có độ rủi ro cao.
+  - [ ] Thiết lập cơ chế **Human-in-the-loop (Chờ con người phê duyệt)** thông qua cổng Gateway trước khi Agent thực thi các tool có độ rủi ro cao.
 
 #### 3.2 Hệ thống Đánh giá Chất lượng & Tracing (Tracing & Evals)
 - [ ] **3.2.1 Triển khai `trace-service`**:
@@ -170,7 +170,7 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 | **Email Agent** | `email-agent` | ✅ Hoàn thành (Cổng 8009) | `apps/email_agent/main.py` | P1 |
 | **Email Tool** | `email-tool` | ✅ Hoàn thành (Cổng 8008) | `tools/email.py` | P1 |
 | **Approval System** | `approval-service` | ⏳ Phase 3 (Chờ làm) | `services/approval-service/` | P1 |
-| **Safety & Eval** | `guardrail-service` | ✅ Hoàn thành (Cổng 8010) | `services/guardrail_service/main.py` | P0 |
+| **Safety & Eval** | `guardrail-service` | 🟡 Có API guardrail, chờ wire-up approval | `services/guardrail_service/main.py` | P0 |
 
 ---
 

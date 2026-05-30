@@ -70,6 +70,21 @@ def list_events(namespace: str = Query("default", description="K8s Namespace")):
         logger.error(f"Error listing events: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/k8s/pods/{pod_name}")
+def describe_pod(
+    pod_name: str,
+    namespace: str = Query("default", description="K8s Namespace")
+):
+    """Retrieve a read-only pod summary for incident analysis"""
+    try:
+        pod = k8s_tool.describe_pod(pod_name, namespace)
+        return {"success": True, "pod": pod}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error describing pod: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ──── Prometheus API endpoints ────
 
 @app.get("/prometheus/query")

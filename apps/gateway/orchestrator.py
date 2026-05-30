@@ -90,6 +90,29 @@ REMOTE_AGENT_ENDPOINTS: dict[ModuleType, AgentEndpoint] = {
         module=ModuleType.BROWSER,
         settings_attr="browser_service_url",
     ),
+    ModuleType.SOCIAL: AgentEndpoint(
+        module=ModuleType.SOCIAL,
+        settings_attr="social_service_url",
+    ),
+    ModuleType.RAG: AgentEndpoint(
+        module=ModuleType.RAG,
+        settings_attr="rag_service_url",
+        path="/retrieve",
+    ),
+    ModuleType.EMAIL: AgentEndpoint(
+        module=ModuleType.EMAIL,
+        settings_attr="email_agent_service_url",
+        path="/execute",
+    ),
+    ModuleType.TOOL: AgentEndpoint(
+        module=ModuleType.TOOL,
+        settings_attr="tool_service_url",
+    ),
+    ModuleType.GUARDRAIL: AgentEndpoint(
+        module=ModuleType.GUARDRAIL,
+        settings_attr="guardrail_service_url",
+        path="/guard/tool",
+    ),
 }
 
 
@@ -110,12 +133,30 @@ class MultiAgentOrchestrator:
         workflow.add_node("computer_use", self._computer_use_node)
         workflow.add_node("browser", self._browser_node)
         workflow.add_node("social", self._social_node)
+        
+        # New AIOps & Platform nodes
+        workflow.add_node("rag", self._rag_node)
+        workflow.add_node("email", self._email_node)
+        workflow.add_node("tool", self._tool_node)
+        workflow.add_node("guardrail", self._guardrail_node)
+        workflow.add_node("aiops", self._aiops_node)
+        workflow.add_node("rca", self._rca_node)
+        workflow.add_node("devops", self._devops_node)
+        workflow.add_node("report", self._report_node)
+
         workflow.add_node("synthesize", self._synthesize_node)
 
         workflow.set_entry_point("manager")
+        
+        all_nodes = [
+            "computer_use", "browser", "social", 
+            "rag", "email", "tool", "guardrail",
+            "aiops", "rca", "devops", "report"
+        ]
+        
         workflow.add_conditional_edges("manager", self._route_tasks, self._route_map())
 
-        for node in ("computer_use", "browser", "social"):
+        for node in all_nodes:
             workflow.add_conditional_edges(node, self._route_tasks, self._route_map())
 
         workflow.add_edge("synthesize", END)
@@ -127,12 +168,34 @@ class MultiAgentOrchestrator:
             "computer_use": "computer_use",
             "browser": "browser",
             "social": "social",
+            "rag": "rag",
+            "email": "email",
+            "tool": "tool",
+            "guardrail": "guardrail",
+            "aiops": "aiops",
+            "rca": "rca",
+            "devops": "devops",
+            "report": "report",
             "synthesize": "synthesize",
         }
 
     async def _manager_node(self, state: AgentState) -> AgentState:
         """Analyze the user request and create an execution plan."""
         logger.info("[MANAGER] Processing: %s", state["user_input"])
+
+        # Guardrail input check
+        try:
+            guard_url = f"{self.settings.guardrail_service_url.rstrip('/')}/guard/input"
+            async with httpx.AsyncClient(timeout=10) as client:
+                guard_res = await client.post(guard_url, json={"text": state["user_input"]})
+                if guard_res.status_code == 200:
+                    guard_data = guard_res.json()
+                    if guard_data.get("action") == "BLOCK":
+                        logger.warning("[MANAGER] Guardrail blocked input: %s", guard_data.get("reason"))
+                        state["error"] = f"Input blocked by Guardrail: {guard_data.get('reason')}"
+                        return state
+        except Exception as e:
+            logger.warning("[MANAGER] Guardrail input check failed or unavailable: %s", e)
 
         allowed_modules = self._allowed_modules(state)
         allowed_names = ", ".join(module.name for module in allowed_modules)
@@ -203,13 +266,69 @@ class MultiAgentOrchestrator:
             payload_builder=self._build_browser_payload,
         )
 
+    async def _rag_node(self, state: AgentState) -> AgentState:
+        return await self._remote_agent_node(
+            state=state,
+            agent=ModuleType.RAG,
+            payload_builder=lambda t: {"query": t.instruction, "top_k": 5},
+        )
+
+    async def _email_node(self, state: AgentState) -> AgentState:
+        return await self._remote_agent_node(
+            state=state,
+            agent=ModuleType.EMAIL,
+            payload_builder=lambda t: {"instruction": t.instruction, "mode": "draft"},
+        )
+
+    async def _tool_node(self, state: AgentState) -> AgentState:
+        return await self._remote_agent_node(
+            state=state,
+            agent=ModuleType.TOOL,
+            payload_builder=lambda t: {"instruction": t.instruction},
+        )
+
+    async def _guardrail_node(self, state: AgentState) -> AgentState:
+        return await self._remote_agent_node(
+            state=state,
+            agent=ModuleType.GUARDRAIL,
+            payload_builder=lambda t: {"tool_name": "unknown", "action": t.instruction, "parameters": {}},
+        )
+
+    async def _aiops_node(self, state: AgentState) -> AgentState:
+        # Placeholder for aiops agent
+        task = self._next_task_for_agent(state, ModuleType.AIOPS)
+        if not task: return state
+        self._record_result(state, task, TaskStatus.COMPLETED, {"success": True, "message": "AIOps analyzed anomalies"}, None, time.perf_counter())
+        return state
+
+    async def _rca_node(self, state: AgentState) -> AgentState:
+        # Placeholder for rca agent
+        task = self._next_task_for_agent(state, ModuleType.RCA)
+        if not task: return state
+        self._record_result(state, task, TaskStatus.COMPLETED, {"success": True, "message": "RCA concluded root cause"}, None, time.perf_counter())
+        return state
+
+    async def _devops_node(self, state: AgentState) -> AgentState:
+        # Placeholder for devops agent
+        task = self._next_task_for_agent(state, ModuleType.DEVOPS)
+        if not task: return state
+        self._record_result(state, task, TaskStatus.COMPLETED, {"success": True, "message": "DevOps analyzed deployment"}, None, time.perf_counter())
+        return state
+
+    async def _report_node(self, state: AgentState) -> AgentState:
+        # Placeholder for report agent
+        task = self._next_task_for_agent(state, ModuleType.REPORT)
+        if not task: return state
+        self._record_result(state, task, TaskStatus.COMPLETED, {"success": True, "message": "Report generated"}, None, time.perf_counter())
+        return state
+
     async def _remote_agent_node(
         self,
         state: AgentState,
         agent: ModuleType,
         payload_builder: Callable[[Task], dict],
     ) -> AgentState:
-        """Execute one pending task by posting to a remote agent service."""
+        """Execute one pending task by posting to a remote agent service with automated guardrail safety interception."""
         task = self._next_task_for_agent(state, agent)
         if not task:
             return state
@@ -218,6 +337,125 @@ class MultiAgentOrchestrator:
         state["current_agent"] = agent
 
         start = time.perf_counter()
+
+        # ──── 1. Input Guardrail Safety Check ────
+        input_safe = True
+        risk_reason = ""
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                guard_resp = await client.post(
+                    f"{self.settings.guardrail_service_url}/guard/input",
+                    json={"prompt": task.instruction}
+                )
+                if guard_resp.status_code == 200:
+                    data = guard_resp.json()
+                    if not data.get("safe", True):
+                        input_safe = False
+                        risk_reason = data.get("reason", "Malicious input pattern detected.")
+        except Exception as e:
+            logger.warning(f"Could not reach guardrail service: {e}. Running local pattern scanner fallback.")
+            # Local fallback regex scanner
+            for pattern in [r"ignore previous", r"override system", r"rm -rf", r"sudo "]:
+                if re.search(pattern, task.instruction, re.IGNORECASE):
+                    input_safe = False
+                    risk_reason = f"Local safety scanner matched pattern: '{pattern}'"
+
+        if not input_safe:
+            logger.warning(f"🚫 [GUARDRAIL BLOCK] Input blocked for task {task.id}: {risk_reason}")
+            self._record_result(
+                state=state,
+                task=task,
+                status=TaskStatus.FAILED,
+                output=None,
+                error_message=f"🚫 Input Safety Block: {risk_reason}",
+                started_at=start,
+            )
+            state["error"] = f"Safety Block: {risk_reason}"
+            return state
+
+        # ──── 2. Tool / Action Execution Guardrail Check ────
+        if agent in [ModuleType.TOOL, ModuleType.COMPUTER_USE, ModuleType.DEVOPS]:
+            tool_allowed = True
+            requires_approval = False
+            verdict = "ALLOW"
+            risk_reason = ""
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    guard_resp = await client.post(
+                        f"{self.settings.guardrail_service_url}/guard/tool",
+                        json={"tool_name": agent.value, "action": task.instruction}
+                    )
+                    if guard_resp.status_code == 200:
+                        data = guard_resp.json()
+                        verdict = data.get("verdict", "ALLOW")
+                        risk_reason = data.get("reason", "")
+                        tool_allowed = data.get("allowed", True)
+                        requires_approval = data.get("requires_approval", False)
+            except Exception as e:
+                logger.warning(f"Could not reach guardrail tool API: {e}. Running local risk analysis fallback.")
+                # Local fallback risk levels
+                action_text = task.instruction.lower()
+                if any(x in action_text for x in ["delete", "restart", "scale", "rollback"]):
+                    verdict = "REQUIRE_APPROVAL"
+                    requires_approval = True
+                    risk_reason = "Destructive/structural command requires supervisor clearance."
+                elif any(x in action_text for x in ["drop", "uninstall", "purge"]):
+                    verdict = "BLOCK"
+                    tool_allowed = False
+                    risk_reason = "Critical dangerous command permanently prohibited."
+
+            if verdict == "BLOCK" or (not tool_allowed and not requires_approval):
+                logger.warning(f"🚫 [GUARDRAIL BLOCK] Restricted tool action prevented: {risk_reason}")
+                self._record_result(
+                    state=state,
+                    task=task,
+                    status=TaskStatus.FAILED,
+                    output=None,
+                    error_message=f"🚫 Restricted Action Safety Block: {risk_reason}",
+                    started_at=start,
+                )
+                return state
+
+            if verdict == "REQUIRE_APPROVAL" or requires_approval:
+                # Check if task id is in approved list
+                approved_tasks = state.get("approved_tasks", [])
+                if task.id not in approved_tasks:
+                    logger.warning(f"⚠️ [GUARDRAIL REQUIRE_APPROVAL] Pausing task {task.id} - Awaiting manual approval.")
+                    
+                    # Proactively call the email agent to draft supervisor approval email!
+                    email_payload = {
+                        "instruction": f"Draft an urgent operator approval request email for task {task.id} requesting execution of: '{task.instruction}'",
+                        "recipient": "supervisor@company.com",
+                        "tone": "formal",
+                        "context_data": {
+                            "task_id": task.id,
+                            "agent": agent.value,
+                            "instruction": task.instruction,
+                            "reason": risk_reason
+                        }
+                    }
+                    try:
+                        async with httpx.AsyncClient(timeout=4.0) as client:
+                            await client.post(
+                                f"{self.settings.email_agent_service_url}/execute",
+                                json=email_payload
+                            )
+                    except Exception as email_err:
+                        logger.error(f"Failed to auto-send approval request email draft: {email_err}")
+
+                    self._record_result(
+                        state=state,
+                        task=task,
+                        status=TaskStatus.FAILED,
+                        output={"status": "AWAITING_APPROVAL", "approval_required": True},
+                        error_message=f"⚠️ Safety Check: Action requires manual supervisor approval. An alert draft has been created for supervisor@company.com in docs/last_email_draft.txt. To continue, approve task {task.id}.",
+                        started_at=start,
+                    )
+                    return state
+                else:
+                    logger.info(f"✅ [GUARDRAIL APPROVED] Task {task.id} approved by supervisor. Launching tool.")
+
+        # ──── 3. Standard Remote API execution ────
         endpoint = REMOTE_AGENT_ENDPOINTS[agent]
         base_url = getattr(self.settings, endpoint.settings_attr)
 

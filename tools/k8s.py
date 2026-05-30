@@ -178,3 +178,53 @@ class K8sTool:
                 "timestamp": "2026-05-31T00:22:10Z"
             }
         ]
+
+    def describe_pod(self, pod_name: str, namespace: str = "default") -> Dict[str, Any]:
+        """Get a read-only pod summary suitable for incident analysis."""
+        if self.use_real_k8s:
+            try:
+                v1 = client.CoreV1Api()
+                pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+                return {
+                    "name": pod.metadata.name,
+                    "namespace": pod.metadata.namespace,
+                    "status": pod.status.phase,
+                    "ip": pod.status.pod_ip,
+                    "node": pod.spec.node_name,
+                    "labels": pod.metadata.labels or {},
+                    "containers": [
+                        {
+                            "name": container.name,
+                            "image": container.image,
+                            "ready": status.ready,
+                            "restart_count": status.restart_count,
+                        }
+                        for container, status in zip(
+                            pod.spec.containers,
+                            pod.status.container_statuses or [],
+                        )
+                    ],
+                }
+            except Exception as e:
+                logger.error(f"Error describing real pod {pod_name}: {e}. Using mock fallback.")
+
+        pods = self.get_pods(namespace)
+        pod = next((item for item in pods if item["name"] == pod_name), None)
+        if pod is None:
+            raise ValueError(f"Pod '{pod_name}' was not found in namespace '{namespace}'")
+
+        container_name = pod_name.split("-", 1)[0]
+        return {
+            **pod,
+            "namespace": namespace,
+            "node": "demo-worker-1",
+            "labels": {"app": pod_name.split("-service", 1)[0]},
+            "containers": [
+                {
+                    "name": container_name,
+                    "image": f"demo/{container_name}:latest",
+                    "ready": pod["status"] == "Running",
+                    "restart_count": pod["restart_count"],
+                }
+            ],
+        }

@@ -80,6 +80,17 @@ class Settings(BaseSettings):
     langsmith_api_key: Optional[str] = None
     langsmith_project: str = "personal-agent"
     log_level: str = "INFO"
+    prometheus_url: str = Field(
+        default="http://localhost:9090",
+        description="Prometheus base URL"
+    )
+
+    # ---- Email ----
+    smtp_server: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    email_drafts_path: str = "docs"
 
     # ──── Service URLs ────
     browser_service_url: str = Field(
@@ -97,6 +108,22 @@ class Settings(BaseSettings):
     rag_service_url: str = Field(
         default="http://rag_service:8007",
         description="RAG service URL"
+    )
+    tool_service_url: str = Field(
+        default="http://tool_service:8008",
+        description="Tool registry service URL"
+    )
+    email_agent_service_url: str = Field(
+        default="http://email_agent:8009",
+        description="Email agent service URL"
+    )
+    guardrail_service_url: str = Field(
+        default="http://guardrail_service:8010",
+        description="Guardrail service URL"
+    )
+    monitoring_service_url: str = Field(
+        default="http://monitoring:8005",
+        description="Monitoring service URL"
     )
     agent_http_timeout_seconds: int = Field(
         default=60,
@@ -123,6 +150,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"
 
 
 @lru_cache(maxsize=1)

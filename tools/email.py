@@ -20,8 +20,8 @@ class EmailTool:
 
     def __init__(self):
         self.settings = get_settings()
-        self.drafts_path = Path("docs")
-        self.drafts_path.mkdir(exist_ok=True)
+        self.drafts_path = Path(self.settings.email_drafts_path)
+        self.drafts_path.mkdir(parents=True, exist_ok=True)
 
     def send_email(
         self,

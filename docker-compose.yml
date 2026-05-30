@@ -255,14 +255,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: tool_service
+      target: tool_service
     container_name: agent_tool_service
     ports:
       - "8008:8008"
     environment:
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
+      SMTP_SERVER: ${SMTP_SERVER:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
     volumes:
       - ./tools:/app/tools
       - ./shared:/app/shared
@@ -273,8 +277,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: guardrail_service
+      target: guardrail_service
     container_name: agent_guardrail_service
     ports:
       - "8010:8010"
@@ -290,8 +293,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: email_agent
+      target: email_agent
     container_name: agent_email_agent
     ports:
       - "8009:8009"
@@ -302,6 +304,10 @@ services:
       OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SMTP_SERVER: ${SMTP_SERVER:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
     volumes:
       - ./apps/email_agent:/app/apps/email_agent
       - ./shared:/app/shared
