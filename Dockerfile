@@ -79,7 +79,6 @@ CMD ["uvicorn", "tools.main:app", "--host", "0.0.0.0", "--port", "8008"]
 FROM base as email_agent
 COPY apps/email_agent /app/apps/email_agent
 COPY shared /app/shared
-COPY tools /app/tools
 CMD ["uvicorn", "apps.email_agent.main:app", "--host", "0.0.0.0", "--port", "8009"]
 
 # Guardrail Service

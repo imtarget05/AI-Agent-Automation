@@ -97,10 +97,10 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 *Mục tiêu: Đảm bảo Agent vận hành an toàn trong môi trường doanh nghiệp. Kiểm soát hành vi nguy hiểm, đo lường độ chính xác và giám sát toàn diện.*
 
 #### 3.1 Hệ thống An toàn & Giám sát Tác vụ (Safety & Guardrails)
-- [ ] **3.1.1 Triển khai `guardrail-service`**:
+- [x] **3.1.1 Triển khai `guardrail-service`**:
   - [x] **Input Guardrail**: Quét prompt đầu vào của người dùng chống Prompt Injection (nhồi lệnh độc hại).
   - [x] **Tool Guardrail**: Kiểm soát chặt chẽ các công cụ có tính phá hủy (ví dụ: Lệnh Shell, scale down pod K8s).
-  - [ ] Thiết lập cơ chế **Human-in-the-loop (Chờ con người phê duyệt)** thông qua cổng Gateway trước khi Agent thực thi các tool có độ rủi ro cao.
+  - [x] Thiết lập cơ chế **Human-in-the-loop (Chờ con người phê duyệt)** thông qua cổng Gateway trước khi Agent thực thi các tool có độ rủi ro cao.
 
 #### 3.2 Hệ thống Đánh giá Chất lượng & Tracing (Tracing & Evals)
 - [ ] **3.2.1 Triển khai `trace-service`**:
@@ -169,8 +169,8 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 | **DevOps Agents** | `devops-agent` | ⏳ Phase 2 (Chờ làm) | `agents/` | P0 |
 | **Email Agent** | `email-agent` | ✅ Hoàn thành (Cổng 8009) | `apps/email_agent/main.py` | P1 |
 | **Email Tool** | `email-tool` | ✅ Hoàn thành (Cổng 8008) | `tools/email.py` | P1 |
-| **Approval System** | `approval-service` | ⏳ Phase 3 (Chờ làm) | `services/approval-service/` | P1 |
-| **Safety & Eval** | `guardrail-service` | 🟡 Có API guardrail, chờ wire-up approval | `services/guardrail_service/main.py` | P0 |
+| **Approval System** | Gateway + `guardrail-service` | ✅ Hoàn thành MVP (in-memory) | `apps/gateway/main.py`, `services/guardrail_service/main.py` | P1 |
+| **Safety & Eval** | `guardrail-service` | ✅ Hoàn thành MVP (Cổng 8010) | `services/guardrail_service/main.py` | P0 |
 
 ---
 

@@ -29,6 +29,14 @@ class AgentType(str, Enum):
     COMPUTER_USE = "computer_use"
     BROWSER = "browser"
     SOCIAL = "social"
+    AIOPS = "aiops"
+    RCA = "rca"
+    RAG = "rag"
+    EMAIL = "email"
+    TOOL = "tool"
+    GUARDRAIL = "guardrail"
+    REPORT = "report"
+    DEVOPS = "devops"
 
 
 class TaskStatus(str, Enum):

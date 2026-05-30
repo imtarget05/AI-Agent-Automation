@@ -5,11 +5,12 @@ Uses the cost-optimized LLMRouter to compose contextual emails based on incident
 
 import logging
 from typing import Dict, Any, Optional
+import httpx
 from fastapi import FastAPI, Body, HTTPException
 from contextlib import asynccontextmanager
 
+from shared.config import get_settings
 from shared.llm import get_llm_router
-from tools.email import EmailTool
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("email_agent")
@@ -28,7 +29,7 @@ app = FastAPI(
 )
 
 llm_router = get_llm_router()
-email_tool = EmailTool()
+settings = get_settings()
 
 EMAIL_COMPOSER_PROMPT = """You are an expert AIOps Communications Agent.
 Your job is to draft a professional email regarding a system incident or operational request.
@@ -55,18 +56,55 @@ Write the email now. Return ONLY raw JSON. No markdown blocks.
 def health():
     return {"status": "ok", "service": "email_agent"}
 
+
+async def send_composed_email(
+    recipient: str,
+    subject: str,
+    body: str,
+    approval_id: Optional[str],
+) -> Dict[str, Any]:
+    """Send through the guarded tool registry so the agent cannot bypass approval."""
+    url = f"{settings.tool_service_url.rstrip('/')}/email/send"
+    try:
+        async with httpx.AsyncClient(timeout=settings.agent_http_timeout_seconds) as client:
+            response = await client.post(
+                url,
+                json={
+                    "to_address": recipient,
+                    "subject": subject,
+                    "body": body,
+                    "is_html": True,
+                    "approval_id": approval_id,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=exc.response.status_code,
+            detail=exc.response.text,
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Tool service unavailable: {exc}",
+        ) from exc
+
+
 @app.post("/execute")
 async def execute_task(
     instruction: str = Body(..., description="Email drafting instruction"),
     recipient: str = Body(..., description="Target email recipient"),
     tone: str = Body("formal", description="Composition tone: formal, short_summary, executive_summary, non_technical"),
-    context_data: Optional[Dict[str, Any]] = Body(None, description="System incident metrics, logs, etc.")
+    context_data: Optional[Dict[str, Any]] = Body(None, description="System incident metrics, logs, etc."),
+    approval_id: Optional[str] = Body(None, description="Operator approval returned by the Gateway"),
+    mode: str = Body("draft", description="Execution mode: draft, send_after_approval, send_now"),
 ):
     """
     Execute high-level email composition task.
-    Drafts the email via LLM and sends it using EmailTool.
+    Drafts the email via LLM and optionally submits it to the guarded tool registry.
     """
-    logger.info(f"Email Agent received task: {instruction} (Tone: {tone})")
+    logger.info(f"Email Agent received task: {instruction} (Tone: {tone}, Mode: {mode})")
     
     prompt = (
         f"INSTRUCTION: {instruction}\n"
@@ -105,22 +143,36 @@ async def execute_task(
             subject = f"AIOps Alert: {instruction[:50]}..."
             body = response_str
 
-        # Send/Save the composed email
-        send_result = email_tool.send_email(
-            to_address=recipient,
+        if mode == "draft":
+            return {
+                "success": True,
+                "agent": "email_agent",
+                "mode": "draft",
+                "subject": subject,
+                "composed_body": body,
+                "message": "Email draft created successfully. To send, use mode='send_now' or 'send_after_approval'."
+            }
+
+        # Submit the composed email through the guarded tool registry
+        send_result = await send_composed_email(
+            recipient=recipient,
             subject=subject,
             body=body,
-            is_html=True
+            approval_id=approval_id,
         )
 
         return {
-            "success": True,
+            "success": send_result.get("success", False),
             "agent": "email_agent",
+            "mode": mode,
             "subject": subject,
             "composed_body": body,
+            "requires_approval": send_result.get("requires_approval", False),
             "send_result": send_result
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error executing Email Agent task: {e}")
         raise HTTPException(status_code=500, detail=str(e))

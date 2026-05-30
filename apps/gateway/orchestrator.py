@@ -113,6 +113,18 @@ REMOTE_AGENT_ENDPOINTS: dict[ModuleType, AgentEndpoint] = {
         settings_attr="guardrail_service_url",
         path="/guard/tool",
     ),
+    ModuleType.AIOPS: AgentEndpoint(
+        module=ModuleType.AIOPS,
+        settings_attr="aiops_agent_service_url",
+    ),
+    ModuleType.RCA: AgentEndpoint(
+        module=ModuleType.RCA,
+        settings_attr="rca_agent_service_url",
+    ),
+    ModuleType.REPORT: AgentEndpoint(
+        module=ModuleType.REPORT,
+        settings_attr="report_agent_service_url",
+    ),
 }
 
 
@@ -295,32 +307,32 @@ class MultiAgentOrchestrator:
         )
 
     async def _aiops_node(self, state: AgentState) -> AgentState:
-        # Placeholder for aiops agent
-        task = self._next_task_for_agent(state, ModuleType.AIOPS)
-        if not task: return state
-        self._record_result(state, task, TaskStatus.COMPLETED, {"success": True, "message": "AIOps analyzed anomalies"}, None, time.perf_counter())
-        return state
+        return await self._remote_agent_node(
+            state=state,
+            agent=ModuleType.AIOPS,
+            payload_builder=lambda t: {"instruction": t.instruction},
+        )
 
     async def _rca_node(self, state: AgentState) -> AgentState:
-        # Placeholder for rca agent
-        task = self._next_task_for_agent(state, ModuleType.RCA)
-        if not task: return state
-        self._record_result(state, task, TaskStatus.COMPLETED, {"success": True, "message": "RCA concluded root cause"}, None, time.perf_counter())
-        return state
+        return await self._remote_agent_node(
+            state=state,
+            agent=ModuleType.RCA,
+            payload_builder=lambda t: {"instruction": t.instruction},
+        )
 
     async def _devops_node(self, state: AgentState) -> AgentState:
-        # Placeholder for devops agent
-        task = self._next_task_for_agent(state, ModuleType.DEVOPS)
-        if not task: return state
-        self._record_result(state, task, TaskStatus.COMPLETED, {"success": True, "message": "DevOps analyzed deployment"}, None, time.perf_counter())
-        return state
+        return await self._remote_agent_node(
+            state=state,
+            agent=ModuleType.DEVOPS,
+            payload_builder=lambda t: {"instruction": t.instruction},
+        )
 
     async def _report_node(self, state: AgentState) -> AgentState:
-        # Placeholder for report agent
-        task = self._next_task_for_agent(state, ModuleType.REPORT)
-        if not task: return state
-        self._record_result(state, task, TaskStatus.COMPLETED, {"success": True, "message": "Report generated"}, None, time.perf_counter())
-        return state
+        return await self._remote_agent_node(
+            state=state,
+            agent=ModuleType.REPORT,
+            payload_builder=lambda t: {"instruction": t.instruction},
+        )
 
     async def _remote_agent_node(
         self,

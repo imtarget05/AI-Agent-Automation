@@ -5,14 +5,15 @@ import uuid
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from shared.config import get_settings
+from shared.guardrails import GuardrailClient, GuardrailServiceError
 from shared.models import ModuleType, TaskRequest, TaskResponse
 from shared.memory import get_long_term_memory
 from apps.gateway.orchestrator import get_orchestrator
@@ -22,6 +23,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+guardrail_client = GuardrailClient()
 
 # ──── Lifecycle ────
 
@@ -70,6 +72,20 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(sec
     return credentials.credentials
 
 
+async def ensure_safe_input(prompt: str) -> None:
+    """Reject unsafe prompts before they reach the orchestration LLM."""
+    try:
+        verdict = await guardrail_client.guard_input(prompt)
+    except GuardrailServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    if not verdict.get("safe"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=verdict.get("reason", "Input rejected by guardrail service"),
+        )
+
+
 # ──── Health Check ────
 
 @app.get("/health")
@@ -81,6 +97,54 @@ async def health_check():
         "version": settings.app_version,
     }
 
+
+# ──── Incident Analysis ────
+
+class IncidentRequest(BaseModel):
+    incident_data: dict
+    session_id: Optional[str] = None
+
+@app.post("/incident/analyze", response_model=TaskResponse)
+async def analyze_incident(
+    request: IncidentRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Analyze an incident using AIOps, RCA, RAG, and Tool agents.
+    """
+    logger.info("Received incident for analysis: %s", request.incident_data)
+    
+    # We convert the structured JSON into a natural language request for the manager
+    # Or bypass manager and execute an AIOps workflow directly.
+    # For now, we will construct a prompt for the manager to plan the workflow.
+    user_input = f"Incident occurred: {request.incident_data}. Please analyze anomalies, find root cause, and draft an email report."
+    
+    session_id = request.session_id or str(uuid.uuid4())
+    orchestrator = get_orchestrator()
+
+    # Allowed modules for incident analysis
+    allowed_modules = [ModuleType.AIOPS, ModuleType.TOOL, ModuleType.RAG, ModuleType.RCA, ModuleType.REPORT, ModuleType.EMAIL]
+
+    start_time = datetime.utcnow()
+    try:
+        result = await orchestrator.execute(
+            user_input=user_input,
+            session_id=session_id,
+            allowed_modules=allowed_modules,
+        )
+
+        exec_time = (datetime.utcnow() - start_time).total_seconds()
+        
+        return TaskResponse(
+            status="completed",
+            plan=result.get("plan"),
+            result=result.get("final_answer"),
+            error=result.get("error"),
+            execution_time_seconds=exec_time,
+        )
+    except Exception as e:
+        logger.error("Incident analysis failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ──── Task Execution ────
 
@@ -100,6 +164,7 @@ async def execute_task(
     """
     session_id = request.session_id or str(uuid.uuid4())
     start_time = datetime.utcnow()
+    await ensure_safe_input(request.user_input)
 
     try:
         orchestrator = get_orchestrator()
@@ -152,6 +217,7 @@ async def execute_task_async(
     """
     session_id = request.session_id or str(uuid.uuid4())
     task_id = str(uuid.uuid4())
+    await ensure_safe_input(request.user_input)
 
     async def run_task():
         """Run in background"""
@@ -189,6 +255,66 @@ async def get_task_status(
         "status": "pending",
         "message": "Task status lookup not yet implemented"
     }
+
+
+# ---- Human Approval Workflow ----
+
+class ToolApprovalRequest(BaseModel):
+    """Proposed guarded tool action requiring an operator decision."""
+    tool_name: str
+    action: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolApprovalDecision(BaseModel):
+    """Operator decision for a pending tool action."""
+    approved: bool
+    decided_by: str
+
+
+@app.post("/approvals")
+async def create_tool_approval(
+    request: ToolApprovalRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """Create an approval request through the authenticated Gateway."""
+    try:
+        return await guardrail_client.request_approval(
+            request.tool_name,
+            request.action,
+            request.parameters,
+        )
+    except GuardrailServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.get("/approvals/{approval_id}")
+async def get_tool_approval(
+    approval_id: str,
+    api_key: str = Depends(verify_api_key),
+):
+    """Return the current status of an operator approval."""
+    try:
+        return await guardrail_client.get_approval(approval_id)
+    except GuardrailServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/approvals/{approval_id}/decision")
+async def decide_tool_approval(
+    approval_id: str,
+    decision: ToolApprovalDecision,
+    api_key: str = Depends(verify_api_key),
+):
+    """Approve or reject a pending tool action."""
+    try:
+        return await guardrail_client.decide_approval(
+            approval_id,
+            decision.approved,
+            decision.decided_by,
+        )
+    except GuardrailServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 # ──── Session Management ────
@@ -235,6 +361,7 @@ async def root():
             "health": "GET /health",
             "execute": "POST /execute (requires API key)",
             "execute_async": "POST /execute-async (requires API key)",
+            "approvals": "POST /approvals (requires API key)",
             "session": "POST /session",
             "history": "GET /session/{session_id}/history",
         },

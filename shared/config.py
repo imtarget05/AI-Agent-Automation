@@ -125,6 +125,22 @@ class Settings(BaseSettings):
         default="http://monitoring:8005",
         description="Monitoring service URL"
     )
+    approval_service_url: str = Field(
+        default="http://approval_service:8011",
+        description="Approval service URL"
+    )
+    report_agent_service_url: str = Field(
+        default="http://report_agent:8012",
+        description="Report agent service URL"
+    )
+    aiops_agent_service_url: str = Field(
+        default="http://aiops_agent:8013",
+        description="AIOps agent service URL"
+    )
+    rca_agent_service_url: str = Field(
+        default="http://rca_agent:8014",
+        description="RCA agent service URL"
+    )
     agent_http_timeout_seconds: int = Field(
         default=60,
         description="Timeout for agent HTTP requests"

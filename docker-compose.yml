@@ -64,6 +64,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       API_SECRET_KEY: ${API_SECRET_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      GUARDRAIL_SERVICE_URL: http://guardrail_service:8010
     depends_on:
       postgres:
         condition: service_healthy
@@ -267,6 +268,7 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      GUARDRAIL_SERVICE_URL: http://guardrail_service:8010
     volumes:
       - ./tools:/app/tools
       - ./shared:/app/shared
@@ -304,15 +306,10 @@ services:
       OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      SMTP_SERVER: ${SMTP_SERVER:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      TOOL_SERVICE_URL: http://tool_service:8008
     volumes:
       - ./apps/email_agent:/app/apps/email_agent
       - ./shared:/app/shared
-      - ./tools:/app/tools
-      - ./docs:/app/docs
     command: uvicorn apps.email_agent.main:app --host 0.0.0.0 --port 8009 --reload
 
   # ──---- Optional: ngrok for local dev ----
