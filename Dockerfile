@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-tk \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir pyautogui pillow
-COPY apps/computer-use /app/apps/computer-use
+COPY apps/computer_use /app/apps/computer_use
 COPY shared /app/shared
 CMD ["uvicorn", "apps.computer_use.main:app", "--host", "0.0.0.0", "--port", "8004"]
 

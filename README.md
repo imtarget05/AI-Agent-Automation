@@ -71,7 +71,7 @@ personal-agent/
 │   │   ├── main.py          # Browser API
 │   │   ├── agent.py         # Browser-use integration
 │   │   └── __init__.py
-│   └── computer-use/         # Desktop automation
+│   └── computer_use/         # Desktop automation
 │       ├── main.py          # Computer use API
 │       ├── agent.py         # Anthropic Computer Use
 │       └── __init__.py

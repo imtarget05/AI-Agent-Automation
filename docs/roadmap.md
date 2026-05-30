@@ -25,13 +25,13 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 *Mục tiêu: Xây dựng bộ khung gầm gồm API Gateway, bộ điều phối trung tâm LangGraph, cơ chế Memory (Redis/Qdrant) và công cụ RAG cơ bản để chat với tài liệu repo.*
 
 #### 1.1 Khởi tạo cấu trúc Thư mục & Môi trường
-- [ ] **1.1.1 Cập nhật cấu trúc thư mục platform**:
+- [x] **1.1.1 Cập nhật cấu trúc thư mục platform**:
   Tổ chức lại monorepo theo đúng cấu trúc đề xuất:
   ```
   apps/gateway/            # Cổng API chính
   apps/social/             # Webhook Facebook/Zalo
   apps/browser/            # Web automation (Playwright)
-  apps/computer-use/       # Desktop automation (Xvfb)
+  apps/computer_use/       # Desktop automation (Xvfb)
   shared/                  # Config, LLM Router, DB Memory chung
   docs/                    # Tài liệu kiến trúc & hạ tầng
   ```
@@ -46,7 +46,6 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
   - [x] Khai báo các mô hình sử dụng (`DEFAULT_MODEL`, `FALLBACK_MODEL`).
 
 #### 1.2 Hoàn thiện API Gateway & Bộ định tuyến LangGraph
-- [ ] **1.2.1 Hoàn thiện Router Thông minh (`shared/llm.py`)**:
 - [x] **1.2.1 Hoàn thiện Router Thông minh (`shared/llm.py`)**:
   - [x] Nâng cấp class `LLMRouter` hỗ trợ kết nối `ollama` cục bộ và cloud APIs song song.
   - [x] Bật cơ chế cost-aware routing (chọn model rẻ cho tác vụ phân tích, model đắt cho tác vụ code).
@@ -160,12 +159,12 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 | Nhóm chức năng | Tên Service | Trạng thái tích hợp | File cấu hình liên quan | Priority |
 | :--- | :--- | :--- | :--- | :--- |
 | **API & Gateway** | `api-gateway` | ✅ Đã có khung core | `apps/gateway/main.py` | P0 |
-| **Orchestrator** | `agent-orchestrator` | 🔨 Đang làm (Mocked) | `apps/gateway/orchestrator.py` | P0 |
+| **Orchestrator** | `agent-orchestrator` | ✅ Hoàn thành (Real HTTP Calls) | `apps/gateway/orchestrator.py` | P0 |
 | **Vector DB** | `qdrant` | ✅ Đã tích hợp Docker | `docker-compose.yml` | P0 |
 | **Local LLM** | `ollama` | ✅ Đã tích hợp Docker | `docker-compose.yml`, `.env` | P0 |
 | **Workflow UI** | `n8n` | ✅ Đã tích hợp Docker | `docker-compose.yml` | P0 |
 | **Database & Cache** | `postgres`, `redis` | ✅ Đã tích hợp Docker | `docker-compose.yml` | P0 |
-| **RAG System** | `rag-service` | ⏳ Phase 1 (Chờ làm) | `shared/memory.py` | P0 |
+| **RAG System** | `rag-service` | ✅ Hoàn thành (Cổng 8007) | `services/rag_service/main.py` | P0 |
 | **AIOps Agents** | `aiops-agent`, `rca-agent` | ⏳ Phase 2 (Chờ làm) | `agents/` | P0 |
 | **DevOps Agents** | `devops-agent` | ⏳ Phase 2 (Chờ làm) | `agents/` | P0 |
 | **Email Agent** | `email-agent` | ⏳ Phase 2 (Chờ làm) | `agents/email-agent/` | P1 |

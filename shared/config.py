@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     # ──── Social Platforms ────
     fb_page_token: str = Field(default="", description="Facebook Page Access Token")
     fb_verify_token: str = Field(default="my_webhook_secret", description="Facebook webhook verify token")
+    fb_app_secret: str = Field(default="", description="Facebook app secret for webhook signatures")
     zalo_oa_token: str = Field(default="", description="Zalo OA access token")
     zalo_server_key: str = Field(default="", description="Zalo server key")
     insta_business_account_id: Optional[str] = None

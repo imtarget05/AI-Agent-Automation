@@ -79,7 +79,7 @@ deployment. Here's what's included:
    ⚠️ Needs: pip install browser-use (if using advanced features)
 
 3. COMPUTER USE AGENT (Port 8004) - FULLY FUNCTIONAL
-   📍 apps/computer-use/
+   📍 apps/computer_use/
    
    Primary: Anthropic Computer Use API
    • Desktop control: Click, type, take screenshots
@@ -331,7 +331,7 @@ Code:
   📁 apps/social/facebook.py ........... Facebook integration
   📁 apps/social/zalo.py ............... Zalo integration
   📁 apps/browser/agent.py ............. Web automation
-  📁 apps/computer-use/agent.py ........ Desktop control
+  📁 apps/computer_use/agent.py ........ Desktop control
   📁 shared/ ............................ Shared infrastructure
 
 Documentation:

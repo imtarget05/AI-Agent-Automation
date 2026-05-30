@@ -5,14 +5,15 @@ import uuid
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from shared.config import get_settings
-from shared.models import TaskRequest, TaskResponse, AgentState
+from shared.models import ModuleType, TaskRequest, TaskResponse
 from shared.memory import get_long_term_memory
 from apps.gateway.orchestrator import get_orchestrator
 
@@ -59,7 +60,7 @@ app.add_middleware(
 security = HTTPBearer()
 
 
-async def verify_api_key(credentials: HTTPAuthCredentials = Depends(security)) -> str:
+async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     """Verify API key from Authorization header"""
     if credentials.credentials != settings.api_secret_key:
         raise HTTPException(
@@ -102,7 +103,11 @@ async def execute_task(
 
     try:
         orchestrator = get_orchestrator()
-        result = await orchestrator.execute(request.user_input, session_id)
+        result = await orchestrator.execute(
+            request.user_input,
+            session_id,
+            allowed_modules=request.modules,
+        )
 
         execution_time = (datetime.utcnow() - start_time).total_seconds()
 
@@ -129,8 +134,9 @@ async def execute_task(
 class AsyncTaskRequest(BaseModel):
     """Request for background task"""
     user_input: str
-    session_id: str = None
-    callback_url: str = None  # Webhook to call when done
+    session_id: Optional[str] = None
+    callback_url: Optional[str] = None  # Webhook to call when done
+    modules: Optional[list[ModuleType]] = None
 
 
 @app.post("/execute-async")
@@ -150,7 +156,11 @@ async def execute_task_async(
     async def run_task():
         """Run in background"""
         orchestrator = get_orchestrator()
-        result = await orchestrator.execute(request.user_input, session_id)
+        result = await orchestrator.execute(
+            request.user_input,
+            session_id,
+            allowed_modules=request.modules,
+        )
 
         # TODO: Store result in database by task_id
         # TODO: Call callback_url webhook if provided

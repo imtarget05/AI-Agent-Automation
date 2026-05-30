@@ -114,7 +114,7 @@ Vì các sub-agent có môi trường runtime cực kỳ phức tạp và xung �
 * **Dockerfile Pattern**: Cần dùng image base `python:3.12-slim` và cài đặt các thư viện C cần thiết cho browser hoặc dùng trực tiếp image chính thức của Playwright `mcr.microsoft.com/playwright/python:v1.45.0-noble`.
 * **Resource Limitation**: Môi trường Chromium tiêu thụ rất nhiều RAM (khoảng 300MB - 800MB/tab). Bắt buộc cấu hình `deploy.resources.limits.memory` trong Docker Compose để tránh hiện tượng Out-Of-Memory (OOM) kéo sập cả VPS.
 
-### Môi trường Headless cho Computer Use Agent (`apps/computer-use`)
+### Môi trường Headless cho Computer Use Agent (`apps/computer_use`)
 Để chạy agent điều khiển màn hình máy tính (`pyautogui` hoặc Anthropic Computer Use API) trên môi trường VPS Linux không có màn hình vật lý, bạn cần dựng một **Virtual Desktop**:
 1. **Xvfb (X Virtual Framebuffer)**: Tạo một màn hình ảo (Virtual Display) ngay trong bộ nhớ RAM của container.
 2. **VNC Server (x11vnc)**: Cho phép kết nối và giám sát hoạt động của agent trực quan bằng công cụ VNC Viewer.

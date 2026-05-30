@@ -352,5 +352,5 @@ Be precise, patient, and verify each action.
 # In apps/browser/agent.py
 # Add BROWSER_AGENT_PROMPT to generate_reply() call
 
-# In apps/computer-use/agent.py
+# In apps/computer_use/agent.py
 # Add COMPUTER_USE_PROMPT to Anthropic call

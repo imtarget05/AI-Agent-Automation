@@ -46,7 +46,7 @@ personal-agent/
 │   ├── browser/                   # Web automation
 │   │   ├── main.py               # Browser API
 │   │   └── agent.py              # browser-use integration
-│   └── computer-use/              # Desktop automation
+│   └── computer_use/              # Desktop automation
 │       ├── main.py               # Computer API
 │       └── agent.py              # Anthropic + PyAutoGUI
 │

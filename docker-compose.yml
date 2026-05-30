@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ──── Infrastructure ────
   postgres:
@@ -53,8 +51,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: gateway
+      target: gateway
     container_name: agent_gateway
     ports:
       - "8000:8000"
@@ -83,8 +80,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: social
+      target: social
     container_name: agent_social
     ports:
       - "8002:8002"
@@ -96,6 +92,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       FB_PAGE_TOKEN: ${FB_PAGE_TOKEN}
       FB_VERIFY_TOKEN: ${FB_VERIFY_TOKEN}
+      FB_APP_SECRET: ${FB_APP_SECRET}
       ZALO_OA_TOKEN: ${ZALO_OA_TOKEN}
       ZALO_SERVER_KEY: ${ZALO_SERVER_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -113,8 +110,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: browser
+      target: browser
     container_name: agent_browser
     ports:
       - "8003:8003"
@@ -132,8 +128,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: computer_use
+      target: computer_use
     container_name: agent_computer_use
     ports:
       - "8004:8004"
@@ -143,7 +138,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DISPLAY: ${DISPLAY}
     volumes:
-      - ./apps/computer-use:/app/apps/computer-use
+      - ./apps/computer_use:/app/apps/computer_use
       - ./shared:/app/shared
       # Mount X11 for desktop access on Linux
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
@@ -187,8 +182,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: monitoring
+      target: monitoring
     container_name: agent_monitoring
     ports:
       - "8005:8005"
@@ -210,8 +204,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: dashboard
+      target: dashboard
     container_name: agent_dashboard
     ports:
       - "8006:8006"
@@ -228,8 +221,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE: rag_service
+      target: rag_service
     container_name: agent_rag_service
     ports:
       - "8007:8007"

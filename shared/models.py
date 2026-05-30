@@ -60,6 +60,7 @@ class AgentState(TypedDict, total=False):
     """Global state passed through LangGraph"""
     session_id: str
     user_input: str
+    allowed_modules: Optional[list[ModuleType]]
     plan: Optional[ExecutionPlan]
     results: dict[str, TaskResult]
     messages: list[dict]
