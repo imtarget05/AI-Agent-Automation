@@ -1,0 +1,283 @@
+version: "3.9"
+
+services:
+  # ──── Infrastructure ────
+  postgres:
+    image: postgres:16-alpine
+    container_name: agent_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_DB: agent_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: agent_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: agent_qdrant
+    ports:
+      - "6333:6333"
+    environment:
+      QDRANT_API_KEY: your_api_key
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ──── Application Services ────
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: gateway
+    container_name: agent_gateway
+    ports:
+      - "8000:8000"
+    environment:
+      ENV: ${ENV:-development}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres_password@postgres:5432/agent_db
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      API_SECRET_KEY: ${API_SECRET_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./apps/gateway:/app/apps/gateway
+      - ./shared:/app/shared
+    command: uvicorn apps.gateway.main:app --host 0.0.0.0 --port 8000 --reload
+
+  social:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: social
+    container_name: agent_social
+    ports:
+      - "8002:8002"
+    environment:
+      ENV: ${ENV:-development}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      FB_PAGE_TOKEN: ${FB_PAGE_TOKEN}
+      FB_VERIFY_TOKEN: ${FB_VERIFY_TOKEN}
+      ZALO_OA_TOKEN: ${ZALO_OA_TOKEN}
+      ZALO_SERVER_KEY: ${ZALO_SERVER_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./apps/social:/app/apps/social
+      - ./shared:/app/shared
+    command: uvicorn apps.social.main:app --host 0.0.0.0 --port 8002 --reload
+
+  browser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: browser
+    container_name: agent_browser
+    ports:
+      - "8003:8003"
+    environment:
+      ENV: ${ENV:-development}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./apps/browser:/app/apps/browser
+      - ./shared:/app/shared
+    command: uvicorn apps.browser.main:app --host 0.0.0.0 --port 8003 --reload
+
+  computer_use:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: computer_use
+    container_name: agent_computer_use
+    ports:
+      - "8004:8004"
+    environment:
+      ENV: ${ENV:-development}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DISPLAY: ${DISPLAY}
+    volumes:
+      - ./apps/computer-use:/app/apps/computer-use
+      - ./shared:/app/shared
+      # Mount X11 for desktop access on Linux
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    command: uvicorn apps.computer_use.main:app --host 0.0.0.0 --port 8004 --reload
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: agent_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Tự động tải mô hình deepseek-r1:8b khi khởi chạy lần đầu
+    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull deepseek-r1:8b && wait"]
+    # Nếu máy bạn có card đồ họa NVIDIA, bạn có thể bỏ comment block dưới đây để chạy tăng tốc GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: agent_n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_METRICS=true
+      - N8N_DIAGNOSTICS_ENABLED=false
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+
+  # ──── Monitoring & Analytics ────
+  monitoring:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: monitoring
+    container_name: agent_monitoring
+    ports:
+      - "8005:8005"
+    environment:
+      ENV: ${ENV:-development}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres_password@postgres:5432/agent_db
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./apps/monitoring:/app/apps/monitoring
+      - ./shared:/app/shared
+    command: uvicorn apps.monitoring.main:app --host 0.0.0.0 --port 8005 --reload
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: dashboard
+    container_name: agent_dashboard
+    ports:
+      - "8006:8006"
+    environment:
+      ENV: ${ENV:-development}
+      MONITORING_URL: http://monitoring:8005
+    depends_on:
+      - monitoring
+    volumes:
+      - ./apps/dashboard:/app/apps/dashboard
+    command: uvicorn apps.dashboard.main:app --host 0.0.0.0 --port 8006 --reload
+
+  rag_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: rag_service
+    container_name: agent_rag_service
+    ports:
+      - "8007:8007"
+    environment:
+      ENV: ${ENV:-development}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      QDRANT_URL: http://qdrant:6333
+      RAG_COLLECTION: ${RAG_COLLECTION:-rag_documents}
+      RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-800}
+      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-100}
+      RAG_DEFAULT_TOP_K: ${RAG_DEFAULT_TOP_K:-5}
+      RAG_DOCS_PATH: ${RAG_DOCS_PATH:-docs}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./services/rag_service:/app/services/rag_service
+      - ./services/__init__.py:/app/services/__init__.py
+      - ./shared:/app/shared
+      - ./docs:/app/docs
+      - ./README.md:/app/README.md
+    command: uvicorn services.rag_service.main:app --host 0.0.0.0 --port 8007 --reload
+
+  # ──---- Optional: ngrok for local dev ----
+  # ngrok:
+  #   image: ngrok/ngrok:latest
+  #   container_name: agent_ngrok
+  #   environment:
+  #     NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+  #   command: http 8000
+  #   ports:
+  #     - "4040:4040"
+
+
+# ──---- Volumes ----
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  ollama_data:
+  n8n_data:
+
+networks:
+  default:
+    name: agent_network

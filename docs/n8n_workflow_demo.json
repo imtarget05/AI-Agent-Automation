@@ -1,0 +1,256 @@
+{
+  "name": "Multi-Agent AIOps Incident & Verification Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "prometheus-alert",
+        "options": {}
+      },
+      "id": "18f8e81c-843e-4fb6-ba7d-cb0bc860471b",
+      "name": "Webhook (Prometheus Alert)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gateway:8000/execute",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"user_input\": \"Hệ thống cảnh báo lỗi: \" + $json.body.commonAnnotations.summary + \". Hãy phân tích nguyên nhân gốc (RCA), tra cứu runbook hướng dẫn và đề xuất giải pháp vá lỗi.\",\n  \"session_id\": \"n8n-\" + $json.body.groupKey\n}",
+        "options": {}
+      },
+      "id": "e0e271bf-9d93-4a1e-8fe5-bdc8e547385d",
+      "name": "Call AI Agent Gateway",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        470,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1",
+          "name": "Gateway API Secret Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.result.plan.tasks.some(t => t.agent === 'devops-agent') }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "2b921350-df4e-41f2-bf89-4d8e79b921c5",
+      "name": "Check Critical Action (DevOps Fix)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        690,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=.env"
+      },
+      "id": "5fa23282-3df6-48eb-bf44-d8bc5e5f32a5",
+      "name": "Email Agent (Compose Stakeholder Mail)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        920,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "incident-alerts",
+        "text": "=🚨 *YÊU CẦU DUYỆT SỬA LỖI HỆ THỐNG*\n*Sự cố:* {{ $node[\"Webhook (Prometheus Alert)\"].json.body.commonAnnotations.summary }}\n*Nguyên nhân:* {{ $node[\"Call AI Agent Gateway\"].json.result }}\n*Giải pháp DevOps đề xuất:* Sửa cấu hình K8s YAML tăng tài nguyên.\n\n👉 Vui lòng truy cập n8n dashboard để DUYỆT hoặc TỪ CHỐI hành động này.",
+        "additionalFields": {}
+      },
+      "id": "3c0234ac-c793-4b68-b7eb-10bc489ac870",
+      "name": "Slack (Request Approval)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [
+        920,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "14f253ac-1738-4e89-9831-294bc8fac872",
+      "name": "Wait for Admin Approval",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gateway:8000/execute-rollout",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"incident_id\": \"{{ $node[\"Call AI Agent Gateway\"].json.session_id }}\",\n  \"approved\": true\n}",
+        "options": {}
+      },
+      "id": "9ac18e8a-028f-4ba6-bce7-d2ab18bc793e",
+      "name": "Execute DevOps Fix (K8s Rollout)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1360,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "ai-ops@company.local",
+        "toEmail": "stakeholders@company.com",
+        "subject": "=📢 [Incident Report] Sự cố đã được xử lý thành công: {{ $node[\"Webhook (Prometheus Alert)\"].json.body.commonAnnotations.summary }}",
+        "html": "=<h3>Báo cáo Xử lý Sự cố Tự động từ AI Agent</h3>\n<p><b>Mã sự cố:</b> {{ $node[\"Call AI Agent Gateway\"].json.session_id }}</p>\n<p><b>Tóm tắt:</b> Sự cố rò rỉ tài nguyên hệ thống đã được cô lập và vá lỗi thành công nhờ DevOps Agent tăng cấu hình resource limit.</p>\n<hr/>\n<p><b>Nội dung email chi tiết được soạn thảo tự động bởi email-agent:</b></p>\n<blockquote>{{ $node[\"Email Agent (Compose Stakeholder Mail)\"].json.result }}</blockquote>\n<hr/>\n<p>Trân trọng,<br/><b>Hệ thống Multi-Agent AIOps Platform</b></p>",
+        "options": {}
+      },
+      "id": "e302ab8f-124b-48c6-bf10-dc9b71bc29b4",
+      "name": "Email Tool (Send Report)",
+      "type": "n8n-nodes-base.email",
+      "typeVersion": 1,
+      "position": [
+        1580,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "incident-alerts",
+        "text": "=✅ *XỬ LÝ SỰ CỐ THÀNH CÔNG*\n*Sự cố:* {{ $node[\"Webhook (Prometheus Alert)\"].json.body.commonAnnotations.summary }}\n*Trạng thái:* Đã rollout fix YAML lên Kubernetes.\n*Email báo cáo:* Đã gửi Stakeholder Report thành công! 📬",
+        "additionalFields": {}
+      },
+      "id": "b304cbab-38f9-4d7a-8fef-17ab98765272",
+      "name": "Slack (Notify Stakeholders)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Prometheus Alert)": {
+      "main": [
+        [
+          {
+            "node": "Call AI Agent Gateway",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call AI Agent Gateway": {
+      "main": [
+        [
+          {
+            "node": "Check Critical Action (DevOps Fix)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Critical Action (DevOps Fix)": {
+      "main": [
+        [
+          {
+            "node": "Email Agent (Compose Stakeholder Mail)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack (Request Approval)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Agent (Compose Stakeholder Mail)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Admin Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack (Request Approval)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Admin Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Admin Approval": {
+      "main": [
+        [
+          {
+            "node": "Execute DevOps Fix (K8s Rollout)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute DevOps Fix (K8s Rollout)": {
+      "main": [
+        [
+          {
+            "node": "Email Tool (Send Report)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Tool (Send Report)": {
+      "main": [
+        [
+          {
+            "node": "Slack (Notify Stakeholders)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "1"
+}
