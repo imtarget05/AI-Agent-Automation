@@ -190,7 +190,7 @@ services:
       ENV: ${ENV:-development}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres_password@postgres:5432/agent_db
+      MONITORING_DATABASE_URL: postgresql+psycopg://postgres:postgres_password@postgres:5432/agent_db
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       postgres:
@@ -250,6 +250,64 @@ services:
       - ./docs:/app/docs
       - ./README.md:/app/README.md
     command: uvicorn services.rag_service.main:app --host 0.0.0.0 --port 8007 --reload
+
+  tool_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: tool_service
+    container_name: agent_tool_service
+    ports:
+      - "8008:8008"
+    environment:
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./tools:/app/tools
+      - ./shared:/app/shared
+      - ./docs:/app/docs
+    command: uvicorn tools.main:app --host 0.0.0.0 --port 8008 --reload
+
+  guardrail_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: guardrail_service
+    container_name: agent_guardrail_service
+    ports:
+      - "8010:8010"
+    environment:
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./services/guardrail_service:/app/services/guardrail_service
+      - ./shared:/app/shared
+    command: uvicorn services.guardrail_service.main:app --host 0.0.0.0 --port 8010 --reload
+
+  email_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: email_agent
+    container_name: agent_email_agent
+    ports:
+      - "8009:8009"
+    environment:
+      ENV: ${ENV:-development}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./apps/email_agent:/app/apps/email_agent
+      - ./shared:/app/shared
+      - ./tools:/app/tools
+      - ./docs:/app/docs
+    command: uvicorn apps.email_agent.main:app --host 0.0.0.0 --port 8009 --reload
 
   # ──---- Optional: ngrok for local dev ----
   # ngrok:

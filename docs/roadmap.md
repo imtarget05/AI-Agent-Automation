@@ -74,7 +74,7 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 - [ ] **2.1.2 `prometheus-tool`**: API tiếp nhận câu lệnh PromQL, truy vấn tài nguyên CPU/RAM, lỗi hệ thống hoặc latency của các service mục tiêu.
 - [ ] **2.1.3 `log-tool`**: Trình tìm kiếm và lọc logs nâng cao từ file log hệ thống hoặc các hệ thống lưu trữ tập trung.
 - [ ] **2.1.4 `github-tool` / `git-tool`**: Tự động hóa việc đọc Git diff, tạo pull request (PR) commit sửa lỗi hoặc tạo GitHub Issue để theo dõi incident.
-- [ ] **2.1.5 `email-tool`**: Tool cấp thấp để gửi email, tạo nháp, đính kèm báo cáo sự cố qua SMTP / Gmail API / SendGrid / AWS SES (Priority P1).
+- [x] **2.1.5 `email-tool`**: Tool cấp thấp để gửi email, tạo nháp, đính kèm báo cáo sự cố qua SMTP / Gmail API / SendGrid / AWS SES (Priority P1).
 
 #### 2.2 Wire-up Bộ Agent AIOps cốt lõi (`agents/`)
 - [ ] **2.2.1 `aiops-agent` (Agent phát hiện sự cố)**:
@@ -89,7 +89,7 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 - [ ] **2.2.4 `devops-agent` (Agent đề xuất và thực thi sửa lỗi)**:
   - [ ] Viết code đề xuất sửa lỗi (ví dụ: vá file cấu hình K8s `.yaml`, sửa Dockerfile hoặc code bị bug).
   - [ ] Tự động đẩy đề xuất sửa lỗi lên GitHub dưới dạng PR.
-- [ ] **2.2.5 `email-agent`**: Agent soạn nội dung email báo cáo incident, email xin approval, tóm tắt lỗi hệ thống gửi stakeholder, cho phép chọn tone giọng (formal, short summary...) (Priority P1).
+- [x] **2.2.5 `email-agent`**: Agent soạn nội dung email báo cáo incident, email xin approval, tóm tắt lỗi hệ thống gửi stakeholder, cho phép chọn tone giọng (formal, short summary...) (Priority P1).
 
 ---
 
@@ -97,10 +97,10 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 *Mục tiêu: Đảm bảo Agent vận hành an toàn trong môi trường doanh nghiệp. Kiểm soát hành vi nguy hiểm, đo lường độ chính xác và giám sát toàn diện.*
 
 #### 3.1 Hệ thống An toàn & Giám sát Tác vụ (Safety & Guardrails)
-- [ ] **3.1.1 Triển khai `guardrail-service`**:
-  - [ ] **Input Guardrail**: Quét prompt đầu vào của người dùng chống Prompt Injection (nhồi lệnh độc hại).
-  - [ ] **Tool Guardrail**: Kiểm soát chặt chẽ các công cụ có tính phá hủy (ví dụ: Lệnh Shell, scale down pod K8s).
-  - [ ] Thiết lập cơ chế **Human-in-the-loop (Chờ con người phê duyệt)** thông qua cổng Gateway trước khi Agent thực thi các tool có độ rủi ro cao.
+- [x] **3.1.1 Triển khai `guardrail-service`**:
+  - [x] **Input Guardrail**: Quét prompt đầu vào của người dùng chống Prompt Injection (nhồi lệnh độc hại).
+  - [x] **Tool Guardrail**: Kiểm soát chặt chẽ các công cụ có tính phá hủy (ví dụ: Lệnh Shell, scale down pod K8s).
+  - [x] Thiết lập cơ chế **Human-in-the-loop (Chờ con người phê duyệt)** thông qua cổng Gateway trước khi Agent thực thi các tool có độ rủi ro cao.
 
 #### 3.2 Hệ thống Đánh giá Chất lượng & Tracing (Tracing & Evals)
 - [ ] **3.2.1 Triển khai `trace-service`**:
@@ -167,10 +167,10 @@ Chúng ta sẽ tập trung hoàn thiện dự án theo **3 Giai đoạn (Phases)
 | **RAG System** | `rag-service` | ✅ Hoàn thành (Cổng 8007) | `services/rag_service/main.py` | P0 |
 | **AIOps Agents** | `aiops-agent`, `rca-agent` | ⏳ Phase 2 (Chờ làm) | `agents/` | P0 |
 | **DevOps Agents** | `devops-agent` | ⏳ Phase 2 (Chờ làm) | `agents/` | P0 |
-| **Email Agent** | `email-agent` | ⏳ Phase 2 (Chờ làm) | `agents/email-agent/` | P1 |
-| **Email Tool** | `email-tool` | ⏳ Phase 2 (Chờ làm) | `tools/email-tool/` | P1 |
+| **Email Agent** | `email-agent` | ✅ Hoàn thành (Cổng 8009) | `apps/email_agent/main.py` | P1 |
+| **Email Tool** | `email-tool` | ✅ Hoàn thành (Cổng 8008) | `tools/email.py` | P1 |
 | **Approval System** | `approval-service` | ⏳ Phase 3 (Chờ làm) | `services/approval-service/` | P1 |
-| **Safety & Eval** | `guardrail-service` | ⏳ Phase 3 (Chờ làm) | `services/` | P0 |
+| **Safety & Eval** | `guardrail-service` | ✅ Hoàn thành (Cổng 8010) | `services/guardrail_service/main.py` | P0 |
 
 ---
 

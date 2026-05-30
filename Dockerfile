@@ -69,6 +69,26 @@ COPY services/__init__.py /app/services/__init__.py
 COPY shared /app/shared
 CMD ["uvicorn", "services.rag_service.main:app", "--host", "0.0.0.0", "--port", "8007"]
 
+# Tool Service
+FROM base as tool_service
+COPY tools /app/tools
+COPY shared /app/shared
+CMD ["uvicorn", "tools.main:app", "--host", "0.0.0.0", "--port", "8008"]
+
+# Email Agent
+FROM base as email_agent
+COPY apps/email_agent /app/apps/email_agent
+COPY shared /app/shared
+COPY tools /app/tools
+CMD ["uvicorn", "apps.email_agent.main:app", "--host", "0.0.0.0", "--port", "8009"]
+
+# Guardrail Service
+FROM base as guardrail_service
+COPY services/guardrail_service /app/services/guardrail_service
+COPY services/__init__.py /app/services/__init__.py
+COPY shared /app/shared
+CMD ["uvicorn", "services.guardrail_service.main:app", "--host", "0.0.0.0", "--port", "8010"]
+
 # ──---- Build instruction ----
 # docker build --target gateway -t agent_gateway:latest .
 # docker build --target social -t agent_social:latest .

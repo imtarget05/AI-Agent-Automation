@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Database setup
-DATABASE_URL = settings.database_url or "sqlite:///./metrics.db"
+DATABASE_URL = settings.monitoring_database_url
 engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -105,6 +105,41 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _enum_value(value):
+    """Return a stable database value for enums and enum-like strings."""
+    return value.value if hasattr(value, "value") else value
+
+
+def _to_metric_record(metric: MetricData) -> MetricRecord:
+    """Map API metrics to the persistence model in one place."""
+    return MetricRecord(
+        metric_type=_enum_value(metric.metric_type),
+        timestamp=metric.timestamp,
+        endpoint=metric.endpoint,
+        method=metric.method,
+        status_code=metric.status_code,
+        response_time_ms=metric.response_time_ms,
+        agent_type=_enum_value(metric.agent_type),
+        task_id=metric.task_id,
+        task_status=_enum_value(metric.task_status),
+        task_duration_ms=metric.task_duration_ms,
+        model_name=metric.model_name,
+        input_tokens=metric.input_tokens,
+        output_tokens=metric.output_tokens,
+        cost_usd=metric.cost_usd,
+        platform=metric.platform,
+        message_type=metric.message_type,
+        error_type=metric.error_type,
+        error_message=metric.error_message,
+        metadata=metric.metadata,
+    )
+
+
+def _json_object(data):
+    """Read JSON columns and tolerate legacy string payloads."""
+    return json.loads(data) if isinstance(data, str) else data
 
 
 # ─── Metrics Collection Routes ───

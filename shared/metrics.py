@@ -159,7 +159,7 @@ class MonthlyMetrics(BaseModel):
 
 class SystemHealth(BaseModel):
     """Current system health status"""
-    status: str  # "healthy", "degraded", "critical"
+    status: str = "healthy"  # "healthy", "degraded", "critical"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     
     # Service status
@@ -199,10 +199,10 @@ class EfficiencyScore(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     
     # Component scores
-    reliability_score: float  # Based on success rate
-    latency_score: float  # Response time
-    cost_efficiency_score: float  # Cost per request
-    resource_utilization_score: float  # CPU/Memory
+    reliability_score: float = 0.0  # Based on success rate
+    latency_score: float = 0.0  # Response time
+    cost_efficiency_score: float = 0.0  # Cost per request
+    resource_utilization_score: float = 0.0  # CPU/Memory
     
     # Recommendations
     recommendations: List[str] = Field(default_factory=list)

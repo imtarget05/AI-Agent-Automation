@@ -56,6 +56,10 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     """Simple text chunking with overlap"""
     if chunk_size <= 0:
         return [text]
+    if overlap < 0:
+        raise ValueError("overlap must be greater than or equal to 0")
+    if overlap >= chunk_size:
+        raise ValueError("overlap must be smaller than chunk_size")
 
     chunks = []
     start = 0
@@ -66,7 +70,9 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
         chunk = text[start:end].strip()
         if chunk:
             chunks.append(chunk)
-        start = max(end - overlap, end)
+        if end >= text_len:
+            break
+        start = end - overlap
 
     return chunks
 

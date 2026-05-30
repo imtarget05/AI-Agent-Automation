@@ -54,6 +54,10 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://postgres:password@localhost:5432/agent_db",
         description="PostgreSQL connection string"
     )
+    monitoring_database_url: str = Field(
+        default="sqlite:///./metrics.db",
+        description="Synchronous SQLAlchemy URL for monitoring metrics",
+    )
     redis_url: str = Field(default="redis://localhost:6379", description="Redis connection")
     qdrant_url: str = Field(default="http://localhost:6333", description="Qdrant vector DB")
 
