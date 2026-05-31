@@ -1,8 +1,7 @@
-"""
-LangGraph orchestration for the multi-agent workflow.
+"""LangGraph orchestration for the multi-agent workflow.
 
-The orchestrator owns planning, task routing, agent invocation, and result
-synthesis. Agent implementation details stay behind HTTP service boundaries.
+The orchestrator owns planning, routing, and result synthesis. Remote execution
+details stay behind the AgentExecutionService application boundary.
 """
 
 from __future__ import annotations
@@ -11,13 +10,13 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 
-import httpx
 from langgraph.graph import END, StateGraph
 
+from apps.gateway.agent_execution import AgentExecutionService
 from shared.config import get_settings
+from shared.guardrails import GuardrailClient
 from shared.llm import get_llm_router
 from shared.memory import get_session_memory
 from shared.models import (
@@ -34,13 +33,21 @@ logger = logging.getLogger(__name__)
 
 MANAGER_PROMPT = """You are a Task Manager Agent for a multi-module AI system.
 
-Your job is to analyze the user's request and create an execution plan by routing
-to specialized agents.
+Analyze the user's request and create an execution plan by routing work to
+specialized agents.
 
 Available agents:
-- COMPUTER_USE: Desktop automation, UI control, screenshots, local app control
-- BROWSER: Web browsing, web search, web extraction, page summarization
-- SOCIAL: Social media auto-reply and customer service responses
+- RAG: retrieve docs, runbooks, README files, and architecture notes
+- AIOPS: detect anomalies from metrics, logs, and events
+- RCA: analyze root causes
+- DEVOPS: analyze deployment, Kubernetes, and CI/CD failures
+- EMAIL: draft or send incident email reports
+- TOOL: invoke Kubernetes, Prometheus, and email tools
+- GUARDRAIL: check potentially dangerous actions
+- REPORT: create incident reports
+- BROWSER: browse, search, extract, and summarize web pages
+- COMPUTER_USE: automate desktop UI actions and screenshots
+- SOCIAL: reply to customer messages on social platforms
 
 Output must be valid JSON:
 {
@@ -48,7 +55,7 @@ Output must be valid JSON:
   "tasks": [
     {
       "id": "task_1",
-      "agent": "COMPUTER_USE|BROWSER|SOCIAL",
+      "agent": "RAG|AIOPS|RCA|DEVOPS|EMAIL|TOOL|GUARDRAIL|REPORT|COMPUTER_USE|BROWSER|SOCIAL",
       "instruction": "Detailed instruction for the agent",
       "expected_output_schema": {"type": "object", "fields": ["field1"]}
     }
@@ -72,81 +79,37 @@ Provide a concise, professional final answer. If some tasks failed, mention the 
 """
 
 
-@dataclass(frozen=True)
-class AgentEndpoint:
-    """HTTP boundary for an agent service."""
-
-    module: ModuleType
-    settings_attr: str
-    path: str = "/execute"
-
-
-REMOTE_AGENT_ENDPOINTS: dict[ModuleType, AgentEndpoint] = {
-    ModuleType.COMPUTER_USE: AgentEndpoint(
-        module=ModuleType.COMPUTER_USE,
-        settings_attr="computer_use_service_url",
-    ),
-    ModuleType.BROWSER: AgentEndpoint(
-        module=ModuleType.BROWSER,
-        settings_attr="browser_service_url",
-    ),
-    ModuleType.SOCIAL: AgentEndpoint(
-        module=ModuleType.SOCIAL,
-        settings_attr="social_service_url",
-    ),
-    ModuleType.RAG: AgentEndpoint(
-        module=ModuleType.RAG,
-        settings_attr="rag_service_url",
-        path="/retrieve",
-    ),
-    ModuleType.EMAIL: AgentEndpoint(
-        module=ModuleType.EMAIL,
-        settings_attr="email_agent_service_url",
-        path="/execute",
-    ),
-    ModuleType.TOOL: AgentEndpoint(
-        module=ModuleType.TOOL,
-        settings_attr="tool_service_url",
-    ),
-    ModuleType.GUARDRAIL: AgentEndpoint(
-        module=ModuleType.GUARDRAIL,
-        settings_attr="guardrail_service_url",
-        path="/guard/tool",
-    ),
-    ModuleType.AIOPS: AgentEndpoint(
-        module=ModuleType.AIOPS,
-        settings_attr="aiops_agent_service_url",
-    ),
-    ModuleType.RCA: AgentEndpoint(
-        module=ModuleType.RCA,
-        settings_attr="rca_agent_service_url",
-    ),
-    ModuleType.REPORT: AgentEndpoint(
-        module=ModuleType.REPORT,
-        settings_attr="report_agent_service_url",
-    ),
-}
-
-
 class MultiAgentOrchestrator:
-    """Coordinates planning, agent execution, and final response synthesis."""
+    """Coordinate planning, agent execution, and final response synthesis."""
 
-    def __init__(self):
-        self.llm = get_llm_router()
-        self.settings = get_settings()
+    def __init__(
+        self,
+        llm=None,
+        settings=None,
+        guardrails=None,
+        agent_execution=None,
+    ):
+        self.llm = llm or get_llm_router()
+        self.settings = settings or get_settings()
+        self.guardrails = guardrails or GuardrailClient(
+            self.settings.guardrail_service_url
+        )
+        self.agent_execution = agent_execution or AgentExecutionService(
+            settings=self.settings,
+            llm=self.llm,
+            guardrails=self.guardrails,
+        )
         self.graph = self._build_graph()
         self.compiled_graph = self.graph.compile()
 
     def _build_graph(self) -> StateGraph:
-        """Build the LangGraph workflow."""
+        """Build the workflow while keeping infrastructure outside the graph."""
         workflow = StateGraph(AgentState)
 
         workflow.add_node("manager", self._manager_node)
         workflow.add_node("computer_use", self._computer_use_node)
         workflow.add_node("browser", self._browser_node)
         workflow.add_node("social", self._social_node)
-        
-        # New AIOps & Platform nodes
         workflow.add_node("rag", self._rag_node)
         workflow.add_node("email", self._email_node)
         workflow.add_node("tool", self._tool_node)
@@ -155,98 +118,35 @@ class MultiAgentOrchestrator:
         workflow.add_node("rca", self._rca_node)
         workflow.add_node("devops", self._devops_node)
         workflow.add_node("report", self._report_node)
-
         workflow.add_node("synthesize", self._synthesize_node)
 
         workflow.set_entry_point("manager")
-        
-        all_nodes = [
-            "computer_use", "browser", "social", 
-            "rag", "email", "tool", "guardrail",
-            "aiops", "rca", "devops", "report"
-        ]
-        
         workflow.add_conditional_edges("manager", self._route_tasks, self._route_map())
-
-        for node in all_nodes:
+        for node in self._agent_nodes():
             workflow.add_conditional_edges(node, self._route_tasks, self._route_map())
 
         workflow.add_edge("synthesize", END)
         return workflow
 
     @staticmethod
-    def _route_map() -> dict[str, str]:
-        return {
-            "computer_use": "computer_use",
-            "browser": "browser",
-            "social": "social",
-            "rag": "rag",
-            "email": "email",
-            "tool": "tool",
-            "guardrail": "guardrail",
-            "aiops": "aiops",
-            "rca": "rca",
-            "devops": "devops",
-            "report": "report",
-            "synthesize": "synthesize",
-        }
+    def _agent_nodes() -> tuple[str, ...]:
+        return (
+            "computer_use",
+            "browser",
+            "social",
+            "rag",
+            "email",
+            "tool",
+            "guardrail",
+            "aiops",
+            "rca",
+            "devops",
+            "report",
+        )
 
-    async def _manager_node(self, state: AgentState) -> AgentState:
-        """Analyze the user request and create an execution plan."""
-        logger.info("[MANAGER] Processing: %s", state["user_input"])
-
-        # Guardrail input check
-        try:
-            guard_url = f"{self.settings.guardrail_service_url.rstrip('/')}/guard/input"
-            async with httpx.AsyncClient(timeout=10) as client:
-                guard_res = await client.post(guard_url, json={"text": state["user_input"]})
-                if guard_res.status_code == 200:
-                    guard_data = guard_res.json()
-                    if guard_data.get("action") == "BLOCK":
-                        logger.warning("[MANAGER] Guardrail blocked input: %s", guard_data.get("reason"))
-                        state["error"] = f"Input blocked by Guardrail: {guard_data.get('reason')}"
-                        return state
-        except Exception as e:
-            logger.warning("[MANAGER] Guardrail input check failed or unavailable: %s", e)
-
-        allowed_modules = self._allowed_modules(state)
-        allowed_names = ", ".join(module.name for module in allowed_modules)
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    MANAGER_PROMPT
-                    + f"\nOnly use these agents for this request: {allowed_names}."
-                ),
-            },
-            {"role": "user", "content": state["user_input"]},
-        ]
-
-        try:
-            response = await self.llm.chat(
-                messages=messages,
-                task="planning",
-                temperature=0.3,
-            )
-            plan_data = self._parse_json_object(response)
-            tasks = self._build_tasks(plan_data, allowed_modules)
-
-            state["plan"] = ExecutionPlan(
-                user_task=state["user_input"],
-                tasks=tasks,
-                estimated_duration_seconds=plan_data.get("estimated_duration_seconds", 30),
-            )
-            state["messages"].append({"role": "manager", "content": response})
-
-            if not tasks:
-                state["error"] = "Manager did not create any executable tasks."
-
-            logger.info("[MANAGER] Created plan with %s executable task(s)", len(tasks))
-        except Exception as exc:
-            logger.error("[MANAGER] Failed to create execution plan: %s", exc, exc_info=True)
-            state["error"] = f"Failed to create execution plan: {exc}"
-
-        return state
+    @classmethod
+    def _route_map(cls) -> dict[str, str]:
+        return {node: node for node in (*cls._agent_nodes(), "synthesize")}
 
     def _route_tasks(self, state: AgentState) -> str:
         """Route to the next pending task or synthesize when complete."""
@@ -261,277 +161,140 @@ class MultiAgentOrchestrator:
         for task in plan.tasks:
             if task.id not in completed:
                 return task.agent.value
-
         return "synthesize"
 
-    async def _computer_use_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.COMPUTER_USE,
-            payload_builder=self._build_computer_payload,
-        )
+    async def _manager_node(self, state: AgentState) -> dict:
+        """Analyze the user request and create an execution plan."""
+        logger.info("[MANAGER] Processing: %s", state["user_input"])
+        updates = {"messages": []}
+        manager_input = state["user_input"]
 
-    async def _browser_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.BROWSER,
-            payload_builder=self._build_browser_payload,
-        )
+        try:
+            guard_data = await self.guardrails.guard_input(manager_input)
+            if not guard_data.get("safe", True):
+                reason = guard_data.get("reason")
+                logger.warning("[MANAGER] Guardrail blocked input: %s", reason)
+                return {"error": f"Input blocked by Guardrail: {reason}"}
+            manager_input = guard_data.get("anonymized_prompt", manager_input)
+        except Exception as exc:
+            logger.warning("[MANAGER] Guardrail input check unavailable: %s", exc)
 
-    async def _rag_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.RAG,
-            payload_builder=lambda t: {"query": t.instruction, "top_k": 5},
-        )
+        allowed_modules = self._allowed_modules(state)
+        allowed_names = ", ".join(module.name for module in allowed_modules)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    MANAGER_PROMPT
+                    + f"\nOnly use these agents for this request: {allowed_names}."
+                ),
+            },
+            {"role": "user", "content": manager_input},
+        ]
 
-    async def _email_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.EMAIL,
-            payload_builder=lambda t: {"instruction": t.instruction, "mode": "draft"},
-        )
+        try:
+            response = await self.llm.chat(
+                messages=messages,
+                task="planning",
+                temperature=0.3,
+            )
+            plan_data = self._parse_json_object(response)
+            tasks = self._build_tasks(plan_data, allowed_modules)
 
-    async def _tool_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.TOOL,
-            payload_builder=lambda t: {"instruction": t.instruction},
-        )
+            updates["plan"] = ExecutionPlan(
+                user_task=state["user_input"],
+                tasks=tasks,
+                estimated_duration_seconds=plan_data.get(
+                    "estimated_duration_seconds",
+                    30,
+                ),
+            )
+            updates["messages"].append({"role": "manager", "content": response})
+            if not tasks:
+                updates["error"] = "Manager did not create any executable tasks."
 
-    async def _guardrail_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.GUARDRAIL,
-            payload_builder=lambda t: {"tool_name": "unknown", "action": t.instruction, "parameters": {}},
-        )
+            logger.info("[MANAGER] Created plan with %s executable task(s)", len(tasks))
+        except Exception as exc:
+            logger.error(
+                "[MANAGER] Failed to create execution plan: %s",
+                exc,
+                exc_info=True,
+            )
+            updates["error"] = f"Failed to create execution plan: {exc}"
+        return updates
 
-    async def _aiops_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.AIOPS,
-            payload_builder=lambda t: {"instruction": t.instruction},
-        )
+    async def _computer_use_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.COMPUTER_USE)
 
-    async def _rca_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.RCA,
-            payload_builder=lambda t: {"instruction": t.instruction},
-        )
+    async def _browser_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.BROWSER)
 
-    async def _devops_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.DEVOPS,
-            payload_builder=lambda t: {"instruction": t.instruction},
-        )
+    async def _rag_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.RAG)
 
-    async def _report_node(self, state: AgentState) -> AgentState:
-        return await self._remote_agent_node(
-            state=state,
-            agent=ModuleType.REPORT,
-            payload_builder=lambda t: {"instruction": t.instruction},
-        )
+    async def _email_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.EMAIL)
+
+    async def _tool_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.TOOL)
+
+    async def _guardrail_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.GUARDRAIL)
+
+    async def _aiops_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.AIOPS)
+
+    async def _rca_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.RCA)
+
+    async def _devops_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.DEVOPS)
+
+    async def _report_node(self, state: AgentState) -> dict:
+        return await self._remote_agent_node(state, ModuleType.REPORT)
 
     async def _remote_agent_node(
         self,
         state: AgentState,
         agent: ModuleType,
-        payload_builder: Callable[[Task], dict],
-    ) -> AgentState:
-        """Execute one pending task by posting to a remote agent service with automated guardrail safety interception."""
+    ) -> dict:
+        """Execute one planned task through the application service."""
         task = self._next_task_for_agent(state, agent)
         if not task:
-            return state
+            return {}
 
         logger.info("[%s] Executing task %s", agent.value.upper(), task.id)
-        state["current_agent"] = agent
+        result = await self.agent_execution.execute(
+            task,
+            approved=task.id in state.get("approved_tasks", []),
+        )
+        return {"results": {task.id: result}}
 
-        start = time.perf_counter()
-
-        # ──── 1. Input Guardrail Safety Check ────
-        input_safe = True
-        risk_reason = ""
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                guard_resp = await client.post(
-                    f"{self.settings.guardrail_service_url}/guard/input",
-                    json={"prompt": task.instruction}
-                )
-                if guard_resp.status_code == 200:
-                    data = guard_resp.json()
-                    if not data.get("safe", True):
-                        input_safe = False
-                        risk_reason = data.get("reason", "Malicious input pattern detected.")
-        except Exception as e:
-            logger.warning(f"Could not reach guardrail service: {e}. Running local pattern scanner fallback.")
-            # Local fallback regex scanner
-            for pattern in [r"ignore previous", r"override system", r"rm -rf", r"sudo "]:
-                if re.search(pattern, task.instruction, re.IGNORECASE):
-                    input_safe = False
-                    risk_reason = f"Local safety scanner matched pattern: '{pattern}'"
-
-        if not input_safe:
-            logger.warning(f"🚫 [GUARDRAIL BLOCK] Input blocked for task {task.id}: {risk_reason}")
-            self._record_result(
-                state=state,
-                task=task,
-                status=TaskStatus.FAILED,
-                output=None,
-                error_message=f"🚫 Input Safety Block: {risk_reason}",
-                started_at=start,
-            )
-            state["error"] = f"Safety Block: {risk_reason}"
-            return state
-
-        # ──── 2. Tool / Action Execution Guardrail Check ────
-        if agent in [ModuleType.TOOL, ModuleType.COMPUTER_USE, ModuleType.DEVOPS]:
-            tool_allowed = True
-            requires_approval = False
-            verdict = "ALLOW"
-            risk_reason = ""
-            try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
-                    guard_resp = await client.post(
-                        f"{self.settings.guardrail_service_url}/guard/tool",
-                        json={"tool_name": agent.value, "action": task.instruction}
-                    )
-                    if guard_resp.status_code == 200:
-                        data = guard_resp.json()
-                        verdict = data.get("verdict", "ALLOW")
-                        risk_reason = data.get("reason", "")
-                        tool_allowed = data.get("allowed", True)
-                        requires_approval = data.get("requires_approval", False)
-            except Exception as e:
-                logger.warning(f"Could not reach guardrail tool API: {e}. Running local risk analysis fallback.")
-                # Local fallback risk levels
-                action_text = task.instruction.lower()
-                if any(x in action_text for x in ["delete", "restart", "scale", "rollback"]):
-                    verdict = "REQUIRE_APPROVAL"
-                    requires_approval = True
-                    risk_reason = "Destructive/structural command requires supervisor clearance."
-                elif any(x in action_text for x in ["drop", "uninstall", "purge"]):
-                    verdict = "BLOCK"
-                    tool_allowed = False
-                    risk_reason = "Critical dangerous command permanently prohibited."
-
-            if verdict == "BLOCK" or (not tool_allowed and not requires_approval):
-                logger.warning(f"🚫 [GUARDRAIL BLOCK] Restricted tool action prevented: {risk_reason}")
-                self._record_result(
-                    state=state,
-                    task=task,
-                    status=TaskStatus.FAILED,
-                    output=None,
-                    error_message=f"🚫 Restricted Action Safety Block: {risk_reason}",
-                    started_at=start,
-                )
-                return state
-
-            if verdict == "REQUIRE_APPROVAL" or requires_approval:
-                # Check if task id is in approved list
-                approved_tasks = state.get("approved_tasks", [])
-                if task.id not in approved_tasks:
-                    logger.warning(f"⚠️ [GUARDRAIL REQUIRE_APPROVAL] Pausing task {task.id} - Awaiting manual approval.")
-                    
-                    # Proactively call the email agent to draft supervisor approval email!
-                    email_payload = {
-                        "instruction": f"Draft an urgent operator approval request email for task {task.id} requesting execution of: '{task.instruction}'",
-                        "recipient": "supervisor@company.com",
-                        "tone": "formal",
-                        "context_data": {
-                            "task_id": task.id,
-                            "agent": agent.value,
-                            "instruction": task.instruction,
-                            "reason": risk_reason
-                        }
-                    }
-                    try:
-                        async with httpx.AsyncClient(timeout=4.0) as client:
-                            await client.post(
-                                f"{self.settings.email_agent_service_url}/execute",
-                                json=email_payload
-                            )
-                    except Exception as email_err:
-                        logger.error(f"Failed to auto-send approval request email draft: {email_err}")
-
-                    self._record_result(
-                        state=state,
-                        task=task,
-                        status=TaskStatus.FAILED,
-                        output={"status": "AWAITING_APPROVAL", "approval_required": True},
-                        error_message=f"⚠️ Safety Check: Action requires manual supervisor approval. An alert draft has been created for supervisor@company.com in docs/last_email_draft.txt. To continue, approve task {task.id}.",
-                        started_at=start,
-                    )
-                    return state
-                else:
-                    logger.info(f"✅ [GUARDRAIL APPROVED] Task {task.id} approved by supervisor. Launching tool.")
-
-        # ──── 3. Standard Remote API execution ────
-        endpoint = REMOTE_AGENT_ENDPOINTS[agent]
-        base_url = getattr(self.settings, endpoint.settings_attr)
-
-        try:
-            response = await self._post_agent(
-                base_url=base_url,
-                path=endpoint.path,
-                payload=payload_builder(task),
-                timeout=task.timeout_seconds or self.settings.agent_http_timeout_seconds,
-            )
-            status = TaskStatus.COMPLETED if response.get("success") else TaskStatus.FAILED
-            self._record_result(
-                state=state,
-                task=task,
-                status=status,
-                output=response,
-                error_message=response.get("error"),
-                started_at=start,
-            )
-        except Exception as exc:
-            logger.error("[%s] Task %s failed: %s", agent.value.upper(), task.id, exc)
-            self._record_result(
-                state=state,
-                task=task,
-                status=TaskStatus.FAILED,
-                output=None,
-                error_message=str(exc),
-                started_at=start,
-            )
-
-        return state
-
-    async def _social_node(self, state: AgentState) -> AgentState:
-        """Social agent placeholder until the social service exposes /execute."""
+    async def _social_node(self, state: AgentState) -> dict:
+        """Return a stable result for the webhook-only social integration."""
         task = self._next_task_for_agent(state, ModuleType.SOCIAL)
         if not task:
-            return state
+            return {}
 
-        logger.info("[SOCIAL] Executing task %s", task.id)
-        state["current_agent"] = ModuleType.SOCIAL
-        start = time.perf_counter()
-
-        output = {
-            "success": True,
-            "message": "Social webhook replies are handled by platform endpoints.",
-            "instruction": task.instruction,
-        }
-        self._record_result(
-            state=state,
-            task=task,
+        started_at = time.perf_counter()
+        result = TaskResult(
+            task_id=task.id,
+            agent=task.agent,
             status=TaskStatus.COMPLETED,
-            output=output,
-            error_message=None,
-            started_at=start,
+            output={
+                "success": True,
+                "message": "Social webhook replies are handled by platform endpoints.",
+                "instruction": task.instruction,
+            },
+            execution_time_seconds=time.perf_counter() - started_at,
         )
-        return state
+        return {"results": {task.id: result}}
 
-    async def _synthesize_node(self, state: AgentState) -> AgentState:
+    async def _synthesize_node(self, state: AgentState) -> dict:
         """Synthesize all agent results into the final answer."""
         logger.info("[SYNTHESIZER] Creating final answer")
-
         if state.get("error") and not state.get("results"):
-            state["final_answer"] = state["error"]
-            return state
+            return {"final_answer": state["error"]}
 
         results_text = self._format_results(state.get("results", {}))
         messages = [
@@ -551,14 +314,38 @@ class MultiAgentOrchestrator:
                 task="summarize",
                 temperature=0.5,
             )
-            state["final_answer"] = response
-            state["messages"].append({"role": "synthesizer", "content": response})
+            if self.settings.accuracy_guardrail_enabled:
+                response = await self._audit_answer(response, results_text)
+            return {
+                "final_answer": response,
+                "messages": [{"role": "synthesizer", "content": response}],
+            }
         except Exception as exc:
             logger.error("[SYNTHESIZER] Error: %s", exc, exc_info=True)
-            state["error"] = f"Synthesis failed: {exc}"
-            state["final_answer"] = results_text or state["error"]
+            return {"final_answer": results_text or f"Synthesis failed: {exc}"}
 
-        return state
+    async def _audit_answer(self, answer: str, results_text: str) -> str:
+        """Correct unsupported claims while keeping audit failure non-fatal."""
+        prompt = f"""You are an Accuracy Auditor. Compare the final answer with the raw agent results.
+Final Answer: {answer}
+Raw Agent Results: {results_text}
+
+Are there factual contradictions or hallucinations in the final answer that are
+not supported by the results? If there are errors, return a corrected answer.
+If the final answer is accurate and supported, reply with 'STRICTLY_ACCURATE'."""
+        try:
+            audit = await self.llm.chat(
+                [{"role": "user", "content": prompt}],
+                task="summarize",
+            )
+        except Exception as exc:
+            logger.warning("[SYNTHESIZER] Accuracy audit failed: %s", exc)
+            return answer
+
+        if "STRICTLY_ACCURATE" in audit:
+            return answer
+        logger.warning("[SYNTHESIZER] Accuracy audit corrected the answer.")
+        return audit
 
     async def execute(
         self,
@@ -568,24 +355,26 @@ class MultiAgentOrchestrator:
     ) -> dict:
         """Execute the full workflow for one user request."""
         logger.info("[ORCHESTRATOR] Starting execution for session %s", session_id)
+        memory = get_session_memory(session_id)
+        history = await memory.get_messages()
+        approved_tasks = await memory.get_approved_tasks()
 
         initial_state: AgentState = {
             "session_id": session_id,
             "user_input": user_input,
             "allowed_modules": allowed_modules,
-            "messages": [],
+            "messages": history,
             "results": {},
             "current_agent": None,
             "final_answer": None,
             "error": None,
+            "approved_tasks": approved_tasks,
         }
-
         final_state = await self.compiled_graph.ainvoke(initial_state)
-        await self._save_session_memory(
-            session_id=session_id,
-            user_input=user_input,
-            assistant_response=final_state.get("final_answer") or "",
-        )
+
+        if final_state.get("final_answer"):
+            await memory.append("user", user_input)
+            await memory.append("assistant", final_state["final_answer"])
 
         return {
             "plan": final_state.get("plan"),
@@ -594,9 +383,10 @@ class MultiAgentOrchestrator:
             "error": final_state.get("error"),
         }
 
-    def _allowed_modules(self, state: AgentState) -> list[ModuleType]:
+    @staticmethod
+    def _allowed_modules(state: AgentState) -> list[ModuleType]:
         configured = state.get("allowed_modules")
-        return configured or list(ModuleType)
+        return list(ModuleType) if configured is None else configured
 
     def _build_tasks(
         self,
@@ -605,7 +395,6 @@ class MultiAgentOrchestrator:
     ) -> list[Task]:
         allowed = set(allowed_modules)
         tasks: list[Task] = []
-
         for index, task_data in enumerate(plan_data.get("tasks", []), start=1):
             agent = self._parse_agent(task_data.get("agent"))
             if agent is None:
@@ -624,16 +413,14 @@ class MultiAgentOrchestrator:
                     expected_output_schema=schema if isinstance(schema, dict) else None,
                 )
             )
-
         return tasks
 
     @staticmethod
     def _parse_agent(raw_agent: object) -> Optional[ModuleType]:
         if not isinstance(raw_agent, str):
             return None
-        normalized = raw_agent.strip().lower()
         try:
-            return ModuleType(normalized)
+            return ModuleType(raw_agent.strip().lower())
         except ValueError:
             return None
 
@@ -653,11 +440,13 @@ class MultiAgentOrchestrator:
         end = text.rfind("}")
         if start >= 0 and end > start:
             return json.loads(text[start : end + 1])
-
         raise ValueError("LLM response did not contain a JSON object")
 
     @staticmethod
-    def _next_task_for_agent(state: AgentState, agent: ModuleType) -> Optional[Task]:
+    def _next_task_for_agent(
+        state: AgentState,
+        agent: ModuleType,
+    ) -> Optional[Task]:
         plan = state.get("plan")
         if not plan:
             return None
@@ -672,100 +461,19 @@ class MultiAgentOrchestrator:
             None,
         )
 
-    def _build_computer_payload(self, task: Task) -> dict:
-        return {"objective": task.instruction}
-
-    def _build_browser_payload(self, task: Task) -> dict:
-        payload = {"instruction": task.instruction}
-
-        url = self._extract_url(task.instruction)
-        if url:
-            payload["url"] = url
-
-        extract_fields = self._extract_fields(task.expected_output_schema)
-        if extract_fields:
-            payload["extract_fields"] = extract_fields
-
-        return payload
-
-    @staticmethod
-    def _extract_url(text: str) -> Optional[str]:
-        """Extract the first URL or domain from text."""
-        url_match = re.search(r"https?://\S+", text)
-        if url_match:
-            return url_match.group(0)
-
-        domain_match = re.search(r"\b([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/\S*)?\b", text)
-        if domain_match:
-            return f"https://{domain_match.group(0)}"
-
-        return None
-
-    @staticmethod
-    def _extract_fields(schema: Optional[dict]) -> Optional[list[str]]:
-        """Extract desired fields from the expected output schema."""
-        if not schema:
-            return None
-        fields = schema.get("fields")
-        if isinstance(fields, list) and all(isinstance(field, str) for field in fields):
-            return fields
-        return None
-
-    async def _post_agent(
-        self,
-        base_url: str,
-        path: str,
-        payload: dict,
-        timeout: int,
-    ) -> dict:
-        """Send a request to an agent service."""
-        url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            return response.json()
-
-    @staticmethod
-    def _record_result(
-        state: AgentState,
-        task: Task,
-        status: TaskStatus,
-        output: object,
-        error_message: Optional[str],
-        started_at: float,
-    ) -> None:
-        state.setdefault("results", {})[task.id] = TaskResult(
-            task_id=task.id,
-            agent=task.agent,
-            status=status,
-            output=output,
-            error_message=error_message,
-            execution_time_seconds=time.perf_counter() - started_at,
-        )
-        logger.info("[%s] Task %s finished with %s", task.agent.value.upper(), task.id, status.value)
-
     @staticmethod
     def _format_results(results: dict[str, TaskResult]) -> str:
         lines = []
         for result in results.values():
-            detail = result.output if result.status == TaskStatus.COMPLETED else result.error_message
+            detail = (
+                result.output
+                if result.status == TaskStatus.COMPLETED
+                else result.error_message
+            )
             lines.append(
                 f"- {result.task_id} ({result.agent.value}, {result.status.value}): {detail}"
             )
         return "\n".join(lines)
-
-    @staticmethod
-    async def _save_session_memory(
-        session_id: str,
-        user_input: str,
-        assistant_response: str,
-    ) -> None:
-        try:
-            session_memory = get_session_memory(session_id)
-            await session_memory.append("user", user_input)
-            await session_memory.append("assistant", assistant_response)
-        except Exception as exc:
-            logger.warning("Session memory save failed: %s", exc)
 
 
 _orchestrator: Optional[MultiAgentOrchestrator] = None

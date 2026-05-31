@@ -3,6 +3,7 @@ Email Agent Service - FastAPI microservice for high-level email composition and 
 Uses the cost-optimized LLMRouter to compose contextual emails based on incident information and desired tone.
 """
 
+import json
 import logging
 from typing import Dict, Any, Optional
 import httpx
@@ -15,17 +16,19 @@ from shared.llm import get_llm_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("email_agent")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("📧 Starting Email Agent microservice")
     yield
     logger.info("🛑 Shutting down Email Agent")
 
+
 app = FastAPI(
     title="Multi-Agent AIOps Email Agent",
     description="High-level agent for composing incident reports and notification emails with tailored tones",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 llm_router = get_llm_router()
@@ -52,6 +55,7 @@ Always output a JSON-wrapped response with keys:
 Write the email now. Return ONLY raw JSON. No markdown blocks.
 """
 
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "email_agent"}
@@ -66,7 +70,9 @@ async def send_composed_email(
     """Send through the guarded tool registry so the agent cannot bypass approval."""
     url = f"{settings.tool_service_url.rstrip('/')}/email/send"
     try:
-        async with httpx.AsyncClient(timeout=settings.agent_http_timeout_seconds) as client:
+        async with httpx.AsyncClient(
+            timeout=settings.agent_http_timeout_seconds
+        ) as client:
             response = await client.post(
                 url,
                 json={
@@ -95,17 +101,28 @@ async def send_composed_email(
 async def execute_task(
     instruction: str = Body(..., description="Email drafting instruction"),
     recipient: str = Body(..., description="Target email recipient"),
-    tone: str = Body("formal", description="Composition tone: formal, short_summary, executive_summary, non_technical"),
-    context_data: Optional[Dict[str, Any]] = Body(None, description="System incident metrics, logs, etc."),
-    approval_id: Optional[str] = Body(None, description="Operator approval returned by the Gateway"),
-    mode: str = Body("draft", description="Execution mode: draft, send_after_approval, send_now"),
+    tone: str = Body(
+        "formal",
+        description="Composition tone: formal, short_summary, executive_summary, non_technical",
+    ),
+    context_data: Optional[Dict[str, Any]] = Body(
+        None, description="System incident metrics, logs, etc."
+    ),
+    approval_id: Optional[str] = Body(
+        None, description="Operator approval returned by the Gateway"
+    ),
+    mode: str = Body(
+        "draft", description="Execution mode: draft, send_after_approval, send_now"
+    ),
 ):
     """
     Execute high-level email composition task.
     Drafts the email via LLM and optionally submits it to the guarded tool registry.
     """
-    logger.info(f"Email Agent received task: {instruction} (Tone: {tone}, Mode: {mode})")
-    
+    logger.info(
+        f"Email Agent received task: {instruction} (Tone: {tone}, Mode: {mode})"
+    )
+
     prompt = (
         f"INSTRUCTION: {instruction}\n"
         f"RECIPIENT: {recipient}\n"
@@ -118,27 +135,27 @@ async def execute_task(
         response_str = await llm_router.chat(
             messages=[
                 {"role": "system", "content": EMAIL_COMPOSER_PROMPT},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
-            task="summarize"  # Cheap & fast cost routing
+            task="summarize",  # Cheap & fast cost routing
         )
-        
+
         # Clean response string if LLM returned markdown blocks
         clean_str = response_str.strip()
-        if clean_str.startswith("```json"):
-            clean_str = clean_str[7:]
-        if clean_str.endswith("```"):
-            clean_str = clean_str[:-3]
-        clean_str = clean_str.strip()
+        if "{" in clean_str and "}" in clean_str:
+            start = clean_str.find("{")
+            end = clean_str.rfind("}")
+            clean_str = clean_str[start : end + 1]
 
         # Parse JSON output from LLM safely
-        import json
         try:
             email_data = json.loads(clean_str)
             subject = email_data.get("subject", "AIOps Platform Notification")
             body = email_data.get("body", "No content generated.")
         except Exception as json_err:
-            logger.warning(f"Failed to parse LLM response as JSON: {json_err}. Using fallback parsing.")
+            logger.warning(
+                f"Failed to parse LLM response as JSON: {json_err}. Using fallback parsing."
+            )
             # Fallback parsing in case JSON is malformed
             subject = f"AIOps Alert: {instruction[:50]}..."
             body = response_str
@@ -150,7 +167,7 @@ async def execute_task(
                 "mode": "draft",
                 "subject": subject,
                 "composed_body": body,
-                "message": "Email draft created successfully. To send, use mode='send_now' or 'send_after_approval'."
+                "message": "Email draft created successfully. To send, use mode='send_now' or 'send_after_approval'.",
             }
 
         # Submit the composed email through the guarded tool registry
@@ -168,7 +185,7 @@ async def execute_task(
             "subject": subject,
             "composed_body": body,
             "requires_approval": send_result.get("requires_approval", False),
-            "send_result": send_result
+            "send_result": send_result,
         }
 
     except HTTPException:

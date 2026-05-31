@@ -2,11 +2,9 @@
 Computer Use Agent - Desktop automation and UI control
 Supports both Anthropic Computer Use API and PyAutoGUI fallback
 """
+
 import logging
-import asyncio
-from typing import Optional, Any
 import base64
-from datetime import datetime
 
 from shared.config import get_settings
 from shared.models import ComputerTask, ComputerResult
@@ -27,12 +25,15 @@ class ComputerUseAgent:
         """Initialize agent"""
         try:
             import anthropic
+
             self.anthropic_client = anthropic.AsyncAnthropic(
                 api_key=settings.anthropic_api_key
             )
             logger.info("✅ Anthropic Computer Use initialized")
         except ImportError:
-            logger.warning("⚠️  Anthropic SDK not available, will use PyAutoGUI fallback")
+            logger.warning(
+                "⚠️  Anthropic SDK not available, will use PyAutoGUI fallback"
+            )
             self.use_anthropic = False
 
     async def execute(self, task: ComputerTask) -> ComputerResult:
@@ -89,23 +90,27 @@ Always be precise with coordinates and careful with dangerous actions."""
             if task.app_name:
                 user_message += f"\nApp to use: {task.app_name}"
             if task.steps:
-                user_message += f"\nSteps provided:\n" + "\n".join(task.steps)
+                user_message += "\nSteps provided:\n" + "\n".join(task.steps)
 
             # Call Anthropic with Computer Use tool
             response = await self.anthropic_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=4096,
                 system=system_prompt,
-                tools=[{
-                    "type": "computer_20241022",
-                    "name": "computer",
-                    "display_width_px": 1920,
-                    "display_height_px": 1080,
-                }],
-                messages=[{
-                    "role": "user",
-                    "content": user_message,
-                }],
+                tools=[
+                    {
+                        "type": "computer_20241022",
+                        "name": "computer",
+                        "display_width_px": 1920,
+                        "display_height_px": 1080,
+                    }
+                ],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": user_message,
+                    }
+                ],
                 betas=["computer-use-2024-10-22"],
             )
 
@@ -117,7 +122,7 @@ Always be precise with coordinates and careful with dangerous actions."""
                 if content_block.type == "text":
                     output_text += content_block.text
 
-            logger.info(f"✅ Anthropic Computer Use completed")
+            logger.info("✅ Anthropic Computer Use completed")
 
             return ComputerResult(
                 success=True,
@@ -139,12 +144,12 @@ Always be precise with coordinates and careful with dangerous actions."""
             from PIL import ImageGrab
 
             pyautogui.FAILSAFE = True  # Move to corner to abort
-            
-            logger.info(f"🖱️  Using PyAutoGUI fallback")
+
+            logger.info("🖱️  Using PyAutoGUI fallback")
 
             # Take initial screenshot
             screenshot_1 = ImageGrab.grab()
-            screenshot_1_b64 = self._image_to_base64(screenshot_1)
+            self._image_to_base64(screenshot_1)
 
             # Parse objective to execute steps
             steps = task.steps or self._parse_objective(task.objective)
@@ -167,7 +172,7 @@ Always be precise with coordinates and careful with dangerous actions."""
                 elif step.startswith("type"):
                     # Example: "type hello world"
                     text = " ".join(step.split()[1:])
-                    pyautogui.typewrite(text.replace(" ", "_"))  # PyAutoGUI limitation
+                    pyautogui.typewrite(text)
                     output_log.append(f"Typed: {text}")
 
                 elif step.startswith("hotkey"):
@@ -191,7 +196,7 @@ Always be precise with coordinates and careful with dangerous actions."""
             screenshot_2 = ImageGrab.grab()
             screenshot_2_b64 = self._image_to_base64(screenshot_2)
 
-            logger.info(f"✅ PyAutoGUI execution completed")
+            logger.info("✅ PyAutoGUI execution completed")
 
             return ComputerResult(
                 success=True,
@@ -233,6 +238,7 @@ Always be precise with coordinates and careful with dangerous actions."""
 
 # ──---- Standalone Functions ----
 
+
 async def run_computer_task(task: ComputerTask) -> ComputerResult:
     """Standalone function to run a computer use task"""
     agent = ComputerUseAgent()
@@ -241,6 +247,7 @@ async def run_computer_task(task: ComputerTask) -> ComputerResult:
 
 
 # Common task templates
+
 
 async def open_application(app_name: str) -> ComputerResult:
     """Open an application"""
@@ -252,7 +259,7 @@ async def open_application(app_name: str) -> ComputerResult:
             f"type {app_name.lower()}",
             "hotkey return",
             "wait 2",
-        ]
+        ],
     )
     return await run_computer_task(task)
 

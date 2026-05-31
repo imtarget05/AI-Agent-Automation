@@ -1,6 +1,7 @@
 """
 Memory layer - Long-term (vector) + Short-term (session) memory
 """
+
 import json
 import uuid
 from typing import Optional
@@ -38,10 +39,7 @@ class LongTermMemory:
             vector_size = len(sample_vector)
             await self.client.create_collection(
                 self.COLLECTION,
-                vectors_config=VectorParams(
-                    size=vector_size,
-                    distance=Distance.COSINE
-                ),
+                vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
             )
         self._initialized = True
 
@@ -54,10 +52,7 @@ class LongTermMemory:
                 await self.init()
 
     async def save(
-        self,
-        text: str,
-        metadata: Optional[dict] = None,
-        namespace: str = "general"
+        self, text: str, metadata: Optional[dict] = None, namespace: str = "general"
     ) -> str:
         """
         Save memory with embedding
@@ -78,12 +73,12 @@ class LongTermMemory:
             "text": text,
             "namespace": namespace,
             "created_at": datetime.utcnow().isoformat(),
-            **(metadata or {})
+            **(metadata or {}),
         }
 
         await self.client.upsert(
             self.COLLECTION,
-            points=[PointStruct(id=point_id, vector=vector, payload=payload)]
+            points=[PointStruct(id=point_id, vector=vector, payload=payload)],
         )
         return point_id
 
@@ -92,7 +87,7 @@ class LongTermMemory:
         query: str,
         limit: int = 5,
         namespace: Optional[str] = None,
-        score_threshold: float = 0.5
+        score_threshold: float = 0.5,
     ) -> list[dict]:
         """
         Search memories by similarity
@@ -113,15 +108,10 @@ class LongTermMemory:
             self.COLLECTION,
             query_vector=query_vector,
             limit=limit,
-            query_filter={
-                "must": [
-                    {
-                        "key": "namespace",
-                        "match": {"value": namespace}
-                    }
-                ]
-            } if namespace else None,
-            score_threshold=score_threshold
+            query_filter={"must": [{"key": "namespace", "match": {"value": namespace}}]}
+            if namespace
+            else None,
+            score_threshold=score_threshold,
         )
 
         return [
@@ -137,8 +127,7 @@ class LongTermMemory:
     async def delete(self, memory_id: str):
         """Delete a memory by ID"""
         await self.client.delete(
-            self.COLLECTION,
-            points_selector={"points": [memory_id]}
+            self.COLLECTION, points_selector={"points": [memory_id]}
         )
 
 
@@ -164,11 +153,7 @@ class SessionMemory:
             history.append(message.model_dump())
 
             # Keep max 50 messages per session
-            await redis.setex(
-                self.key,
-                self.TTL,
-                json.dumps(history[-50:])
-            )
+            await redis.setex(self.key, self.TTL, json.dumps(history[-50:]))
         finally:
             await redis.aclose()
 
@@ -201,6 +186,28 @@ class SessionMemory:
         """Get messages in LLM format (role + content only)"""
         history = await self.get()
         return [{"role": msg["role"], "content": msg["content"]} for msg in history]
+
+    async def get_approved_tasks(self) -> list[str]:
+        """Get list of approved task IDs for this session"""
+        redis = await self._get_redis()
+        try:
+            data = await redis.get(f"{self.key}:approved")
+            return json.loads(data) if data else []
+        finally:
+            await redis.aclose()
+
+    async def add_approved_task(self, task_id: str):
+        """Add a task ID to the approved list"""
+        redis = await self._get_redis()
+        try:
+            approved = await self.get_approved_tasks()
+            if task_id not in approved:
+                approved.append(task_id)
+                await redis.setex(
+                    f"{self.key}:approved", self.TTL, json.dumps(approved)
+                )
+        finally:
+            await redis.aclose()
 
 
 # Global instances

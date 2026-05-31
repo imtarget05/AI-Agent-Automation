@@ -1,10 +1,19 @@
 """HTTP client for the central guardrail service."""
 
+import logging
 from typing import Any, Optional
 
 import httpx
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential_jitter,
+    retry_if_exception,
+)
 
 from shared.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class GuardrailServiceError(RuntimeError):
@@ -82,10 +91,30 @@ class GuardrailClient:
         json: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         url = f"{self.base_url}/{path.lstrip('/')}"
-        try:
+
+        def is_transient_http(exc: Exception) -> bool:
+            if isinstance(
+                exc, (httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError)
+            ):
+                return True
+            if isinstance(exc, httpx.HTTPStatusError):
+                return exc.response.status_code >= 500
+            return False
+
+        @retry(
+            retry=retry_if_exception(is_transient_http),
+            stop=stop_after_attempt(3),
+            wait=wait_exponential_jitter(initial=0.5, max=4, jitter=1),
+            reraise=True,
+        )
+        async def _do_call():
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.request(method, url, json=json)
                 response.raise_for_status()
+                return response
+
+        try:
+            response = await _do_call()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text
             try:
@@ -93,10 +122,14 @@ class GuardrailClient:
             except ValueError:
                 pass
             raise GuardrailServiceError(str(detail), exc.response.status_code) from exc
-        except httpx.HTTPError as exc:
-            raise GuardrailServiceError(f"Guardrail service unavailable: {exc}") from exc
+        except Exception as exc:
+            raise GuardrailServiceError(
+                f"Guardrail service unavailable: {exc}"
+            ) from exc
 
         data = response.json()
         if not isinstance(data, dict):
-            raise GuardrailServiceError("Guardrail service returned an invalid response")
+            raise GuardrailServiceError(
+                "Guardrail service returned an invalid response"
+            )
         return data

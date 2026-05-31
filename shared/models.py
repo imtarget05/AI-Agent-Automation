@@ -1,8 +1,10 @@
 """
 Shared Pydantic models used across modules
 """
+
 from pydantic import BaseModel, Field
-from typing import Optional, Any, Literal, TypedDict
+import operator
+from typing import Annotated, Optional, Any, Literal, TypedDict
 from datetime import datetime
 from enum import Enum
 from uuid import uuid4
@@ -10,10 +12,11 @@ from uuid import uuid4
 
 class ModuleType(str, Enum):
     """Available modules"""
+
     COMPUTER_USE = "computer_use"
     BROWSER = "browser"
     SOCIAL = "social"
-    
+
     RAG = "rag"
     AIOPS = "aiops"
     RCA = "rca"
@@ -26,6 +29,7 @@ class ModuleType(str, Enum):
 
 class TaskStatus(str, Enum):
     """Task execution status"""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -35,8 +39,10 @@ class TaskStatus(str, Enum):
 
 # ──── Orchestration Models ────
 
+
 class Task(BaseModel):
     """Single task in execution plan"""
+
     id: str
     agent: ModuleType
     instruction: str
@@ -47,6 +53,7 @@ class Task(BaseModel):
 
 class ExecutionPlan(BaseModel):
     """Plan created by Manager Agent"""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     user_task: str
     tasks: list[Task]
@@ -56,6 +63,7 @@ class ExecutionPlan(BaseModel):
 
 class TaskResult(BaseModel):
     """Result from completed task"""
+
     task_id: str
     agent: ModuleType
     status: TaskStatus
@@ -67,19 +75,22 @@ class TaskResult(BaseModel):
 
 class AgentState(TypedDict, total=False):
     """Global state passed through LangGraph"""
+
     session_id: str
     user_input: str
     allowed_modules: Optional[list[ModuleType]]
     plan: Optional[ExecutionPlan]
-    results: dict[str, TaskResult]
-    messages: list[dict]
+    results: Annotated[dict[str, TaskResult], operator.or_]  # Merge dictionaries
+    messages: Annotated[list[dict], operator.add]  # Append to list
     current_agent: Optional[ModuleType]
     final_answer: Optional[str]
     error: Optional[str]
+    approved_tasks: list[str]
 
 
 class ChatMessage(BaseModel):
     """Chat message stored in session memory"""
+
     role: str
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -87,8 +98,10 @@ class ChatMessage(BaseModel):
 
 # ──── Social Platform Models ────
 
+
 class FacebookMessage(BaseModel):
     """Facebook Messenger message"""
+
     sender_id: str
     recipient_id: str
     text: str
@@ -97,24 +110,37 @@ class FacebookMessage(BaseModel):
 
 class ZaloMessage(BaseModel):
     """Zalo message"""
+
     user_id: str
     oa_id: str
     text: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
+class TelegramMessage(BaseModel):
+    """Telegram message"""
+
+    chat_id: int
+    user_id: Optional[int] = None
+    text: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 class SocialBotReply(BaseModel):
     """Generated reply for social platform"""
+
     original_message: str
     reply: str
-    platform: Literal["facebook", "zalo", "instagram"]
+    platform: Literal["facebook", "zalo", "telegram", "instagram"]
     confidence: float = Field(ge=0, le=1)
 
 
 # ──── Browser Agent Models ────
 
+
 class BrowserTask(BaseModel):
     """Task for browser agent"""
+
     url: Optional[str] = None
     search_query: Optional[str] = None
     instruction: str
@@ -123,6 +149,7 @@ class BrowserTask(BaseModel):
 
 class BrowserResult(BaseModel):
     """Result from browser automation"""
+
     success: bool
     data: Optional[Any] = None
     error: Optional[str] = None
@@ -131,8 +158,10 @@ class BrowserResult(BaseModel):
 
 # ──── Computer Use Models ────
 
+
 class ComputerAction(str, Enum):
     """Available computer actions"""
+
     CLICK = "click"
     TYPE = "type"
     SCREENSHOT = "screenshot"
@@ -142,6 +171,7 @@ class ComputerAction(str, Enum):
 
 class ComputerTask(BaseModel):
     """Task for computer use agent"""
+
     objective: str
     app_name: Optional[str] = None
     steps: Optional[list[str]] = None
@@ -149,6 +179,7 @@ class ComputerTask(BaseModel):
 
 class ComputerResult(BaseModel):
     """Result from computer use"""
+
     success: bool
     screenshot: Optional[str] = None  # Base64
     output: Optional[str] = None
@@ -157,8 +188,10 @@ class ComputerResult(BaseModel):
 
 # ──── API Models ────
 
+
 class TaskRequest(BaseModel):
     """User request to execute task"""
+
     user_input: str
     session_id: Optional[str] = None
     modules: Optional[list[ModuleType]] = None
@@ -166,6 +199,7 @@ class TaskRequest(BaseModel):
 
 class TaskResponse(BaseModel):
     """Response with task result"""
+
     status: str
     plan: Optional[ExecutionPlan] = None
     result: Optional[str] = None

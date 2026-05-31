@@ -1,0 +1,9 @@
+{
+  "incident_data": {
+    "service": "auth-gateway",
+    "alert": "Pod Restarting - OOMKilled",
+    "severity": "WARNING",
+    "timestamp": "2026-05-31T00:00:00Z",
+    "details": "Authentication gateway is restarting frequently due to memory limits."
+  }
+}

@@ -10,9 +10,7 @@ from fastapi.responses import FileResponse
 import os
 
 app = FastAPI(
-    title="Dashboard",
-    description="System monitoring dashboard",
-    version="1.0.0"
+    title="Dashboard", description="System monitoring dashboard", version="1.0.0"
 )
 
 # Serve static files
@@ -27,7 +25,9 @@ async def serve_dashboard():
     index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
-    return {"message": "Dashboard assets not found. Run npm build in dashboard directory."}
+    return {
+        "message": "Dashboard assets not found. Run npm build in dashboard directory."
+    }
 
 
 @app.get("/health")
@@ -38,4 +38,5 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8006)

@@ -1,0 +1,188 @@
+# ============================================================
+#  docker-compose.dev.yml  — Zero-infra local development
+# ============================================================
+#
+#  Designed for:  make dev  (no real Prometheus/K8s required)
+#  Tools fall back to built-in MOCK data automatically.
+#  Only real deps: Redis (session/job-store) + Qdrant (RAG)
+#
+#  Usage:
+#    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#  Or via Makefile:
+#    make dev
+# ============================================================
+
+services:
+
+  # ── Override ENV for every service to dev/mock mode ────────
+
+  gateway:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+      API_SECRET_KEY: dev-secret-key-change-in-prod
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-dev-placeholder}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-ant-dev-placeholder}
+      DATABASE_URL: "sqlite+aiosqlite:///./data/dev.db"
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      GUARDRAIL_SERVICE_URL: http://guardrail_service:8010
+      APPROVAL_SERVICE_URL: http://approval_service:8011
+      REPORT_AGENT_SERVICE_URL: http://report_agent:8012
+      AIOPS_AGENT_SERVICE_URL: http://aiops_agent:8013
+      RCA_AGENT_SERVICE_URL: http://rca_agent:8014
+      DEVOPS_AGENT_SERVICE_URL: http://devops_agent:8015
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000","http://localhost:8006"]'
+    depends_on: !override
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./apps/gateway:/app/apps/gateway
+      - ./shared:/app/shared
+      - ./data:/app/data
+    command: uvicorn apps.gateway.main:app --host 0.0.0.0 --port 8000 --reload
+
+  aiops_agent:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+      # MOCK: Tool service provides mock Prometheus metrics — see tools/prometheus.py
+      TOOL_SERVICE_URL: http://tool_service:8008
+    volumes:
+      - ./apps/aiops_agent:/app/apps/aiops_agent
+      - ./shared:/app/shared
+    command: uvicorn apps.aiops_agent.main:app --host 0.0.0.0 --port 8013 --reload
+
+  rca_agent:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+      RAG_SERVICE_URL: http://rag_service:8007
+      TOOL_SERVICE_URL: http://tool_service:8008
+    volumes:
+      - ./apps/rca_agent:/app/apps/rca_agent
+      - ./shared:/app/shared
+    command: uvicorn apps.rca_agent.main:app --host 0.0.0.0 --port 8014 --reload
+
+  devops_agent:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./apps/devops_agent:/app/apps/devops_agent
+      - ./shared:/app/shared
+    command: uvicorn apps.devops_agent.main:app --host 0.0.0.0 --port 8015 --reload
+
+  report_agent:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./apps/report_agent:/app/apps/report_agent
+      - ./shared:/app/shared
+    command: uvicorn apps.report_agent.main:app --host 0.0.0.0 --port 8012 --reload
+
+  email_agent:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-dev-placeholder}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-ant-dev-placeholder}
+      TOOL_SERVICE_URL: http://tool_service:8008
+      # MOCK: Email sending disabled in dev — drafts saved to docs/ instead
+      SMTP_SERVER: ""
+    volumes:
+      - ./apps/email_agent:/app/apps/email_agent
+      - ./shared:/app/shared
+      - ./docs:/app/docs
+    command: uvicorn apps.email_agent.main:app --host 0.0.0.0 --port 8009 --reload
+
+  guardrail_service:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./services/guardrail_service:/app/services/guardrail_service
+      - ./shared:/app/shared
+    command: uvicorn services.guardrail_service.main:app --host 0.0.0.0 --port 8010 --reload
+
+  approval_service:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./services/approval_service:/app/services/approval_service
+      - ./shared:/app/shared
+      - ./data:/app/data
+    command: uvicorn services.approval_service.main:app --host 0.0.0.0 --port 8011 --reload
+
+  rag_service:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-dev-placeholder}
+      QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ./services/rag_service:/app/services/rag_service
+      - ./shared:/app/shared
+      - ./docs:/app/docs
+      - ./README.md:/app/README.md
+    command: uvicorn services.rag_service.main:app --host 0.0.0.0 --port 8007 --reload
+
+  tool_service:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+      # MOCK: No real Prometheus URL — tool falls back to mock metrics automatically
+      PROMETHEUS_URL: http://prometheus-not-running:9090
+    volumes:
+      - ./tools:/app/tools
+      - ./shared:/app/shared
+      - ./docs:/app/docs
+    command: uvicorn tools.main:app --host 0.0.0.0 --port 8008 --reload
+
+  eval_service:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./services/eval_service:/app/services/eval_service
+      - ./shared:/app/shared
+    command: uvicorn services.eval_service.main:app --host 0.0.0.0 --port 8016 --reload
+
+  monitoring:
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+      MONITORING_DATABASE_URL: "sqlite:///./data/dev_metrics.db"
+    depends_on: !reset []
+    volumes:
+      - ./apps/monitoring:/app/apps/monitoring
+      - ./shared:/app/shared
+      - ./data:/app/data
+    command: uvicorn apps.monitoring.main:app --host 0.0.0.0 --port 8005 --reload
+
+  dashboard:
+    environment:
+      ENV: development
+      MONITORING_URL: http://monitoring:8005
+    volumes:
+      - ./apps/dashboard:/app/apps/dashboard
+      - ./shared:/app/shared
+    command: uvicorn apps.dashboard.main:app --host 0.0.0.0 --port 8006 --reload
+
+  # ── Disable heavy infra not needed for dev ─────────────────
+
+  # Ollama is too large for basic dev — disable it
+  ollama:
+    profiles: ["gpu"]   # only start with: docker compose --profile gpu up
+
+  # n8n only needed for workflow automation testing
+  n8n:
+    profiles: ["workflows"]
+
+  # Postgres not needed — agents use SQLite in dev mode
+  postgres:
+    profiles: ["production-like"]

@@ -1,6 +1,7 @@
 """
 Computer Use Module API
 """
+
 import logging
 from fastapi import FastAPI, HTTPException, status
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from apps.computer_use.agent import ComputerUseAgent
 logger = logging.getLogger(__name__)
 
 # ──---- Lifecycle ----
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,6 +45,7 @@ async def get_agent() -> ComputerUseAgent:
 
 # ──---- Endpoints ----
 
+
 @app.post("/execute", response_model=ComputerResult)
 async def execute_computer_task(task: ComputerTask):
     """
@@ -73,8 +76,7 @@ async def execute_computer_task(task: ComputerTask):
     except Exception as e:
         logger.error(f"Task execution failed: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
 
@@ -92,8 +94,7 @@ async def take_screenshot():
     except Exception as e:
         logger.error(f"Screenshot failed: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
 
@@ -102,8 +103,7 @@ async def click_ui(x: int, y: int, description: str = ""):
     """Click at specific screen position"""
     agent = await get_agent()
     task = ComputerTask(
-        objective=f"Click at ({x}, {y}) {description}",
-        steps=[f"click {x} {y}"]
+        objective=f"Click at ({x}, {y}) {description}", steps=[f"click {x} {y}"]
     )
 
     try:
@@ -112,8 +112,7 @@ async def click_ui(x: int, y: int, description: str = ""):
     except Exception as e:
         logger.error(f"Click failed: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
 

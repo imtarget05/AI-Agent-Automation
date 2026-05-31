@@ -15,6 +15,7 @@ from shared.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+
 class EmailTool:
     """Tool class for drafting and sending system emails"""
 
@@ -48,27 +49,29 @@ class EmailTool:
         if server and user and pwd:
             try:
                 msg = MIMEMultipart()
-                msg['From'] = from_addr
-                msg['To'] = to_address
-                msg['Subject'] = subject
+                msg["From"] = from_addr
+                msg["To"] = to_address
+                msg["Subject"] = subject
 
-                part = MIMEText(body, 'html' if is_html else 'plain', 'utf-8')
+                part = MIMEText(body, "html" if is_html else "plain", "utf-8")
                 msg.attach(part)
 
                 with smtplib.SMTP(server, port) as smtp:
                     smtp.starttls()
                     smtp.login(user, pwd)
                     smtp.send_message(msg)
-                
+
                 logger.info(f"Email successfully sent to {to_address} via SMTP.")
                 return {
                     "success": True,
                     "method": "smtp",
                     "recipient": to_address,
-                    "subject": subject
+                    "subject": subject,
                 }
             except Exception as e:
-                logger.error(f"Failed to send email via SMTP: {e}. Falling back to local draft writer.")
+                logger.error(
+                    f"Failed to send email via SMTP: {e}. Falling back to local draft writer."
+                )
 
         # Local fallback - write the email as a draft file
         draft_file = self.drafts_path / "last_email_draft.txt"
@@ -86,18 +89,17 @@ class EmailTool:
                 f"==================================================\n"
             )
             draft_file.write_text(draft_content, encoding="utf-8")
-            logger.info(f"Email draft written to local workspace: {draft_file.absolute()}")
-            
+            logger.info(
+                f"Email draft written to local workspace: {draft_file.absolute()}"
+            )
+
             return {
                 "success": True,
                 "method": "local_file_draft",
                 "draft_path": str(draft_file.absolute()),
                 "recipient": to_address,
-                "subject": subject
+                "subject": subject,
             }
         except Exception as e:
             logger.error(f"Failed to write local email draft: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}

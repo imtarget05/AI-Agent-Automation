@@ -1,0 +1,23 @@
+[
+  {
+    "id": "tc_1",
+    "name": "Memory Leak in Web Application",
+    "query": "Incident Alert: CPU usage of web-pod-1 has spiked to 98% and node k8s-node-2 reports high swap usage. Find the root cause and patch the deployment.",
+    "expected_trajectory": ["rag", "rca", "devops", "tool"],
+    "ground_truth_context": "The runbook in docs/runbook.md specifies: In case of web-pod memory leak or CPU spike above 95%, SREs should check connections, scale down the pod to force k8s scheduling, or apply CPU limit patch using kubectl. The service depends on cache-service."
+  },
+  {
+    "id": "tc_2",
+    "name": "Database Connection Timeout",
+    "query": "System Error: The authentication service auth-service is experiencing 100% connection timeouts when trying to authenticate users. Verify the database pod db-pod-0 status and report to stakeholders.",
+    "expected_trajectory": ["rag", "rca", "email"],
+    "ground_truth_context": "The architecture guide states: auth-service has a hard dependency on db-service. If db-service fails to resolve, authentication fails. SREs should inspect db-pod-0 logs for locking issues."
+  },
+  {
+    "id": "tc_3",
+    "name": "Redis Cache Eviction Overload",
+    "query": "Incident: latency spiked to 5000ms. cache-pod-0 status is overloaded. Retrieve solution and restart the cache pod.",
+    "expected_trajectory": ["rag", "tool"],
+    "ground_truth_context": "The caching document notes: cache-service (Redis) uses maxmemory-policy volatile-lru. If memory spikes, evictions can cause high latency. SREs should flushall or restart the cache pod."
+  }
+]

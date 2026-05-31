@@ -1,6 +1,7 @@
 """
 Browser Module API - Expose browser automation as a service
 """
+
 import logging
 from fastapi import FastAPI, HTTPException, status
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from apps.browser.agent import BrowserAgent
 logger = logging.getLogger(__name__)
 
 # ──---- Lifecycle ----
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,6 +45,7 @@ async def get_agent() -> BrowserAgent:
 
 # ──---- Endpoints ----
 
+
 @app.post("/execute", response_model=BrowserResult)
 async def execute_browser_task(task: BrowserTask):
     """
@@ -65,8 +68,7 @@ async def execute_browser_task(task: BrowserTask):
     except Exception as e:
         logger.error(f"Task execution failed: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
 
@@ -92,8 +94,7 @@ async def search_web(query: str, extract_fields: list[str] = None):
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
 

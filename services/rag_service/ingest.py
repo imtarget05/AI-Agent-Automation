@@ -77,7 +77,9 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     return chunks
 
 
-def iter_files(base_path: Path, extensions: Optional[list[str]] = None) -> Iterable[Path]:
+def iter_files(
+    base_path: Path, extensions: Optional[list[str]] = None
+) -> Iterable[Path]:
     """Yield files under base path with matching extensions"""
     exts = extensions or DEFAULT_EXTENSIONS
     for path in base_path.rglob("*"):
@@ -97,11 +99,13 @@ def build_chunks(
         if not text.strip():
             continue
         for idx, chunk in enumerate(chunk_text(text, chunk_size, overlap)):
-            chunks.append({
-                "text": chunk,
-                "source": str(file_path),
-                "chunk_index": idx,
-            })
+            chunks.append(
+                {
+                    "text": chunk,
+                    "source": str(file_path),
+                    "chunk_index": idx,
+                }
+            )
     return chunks
 
 

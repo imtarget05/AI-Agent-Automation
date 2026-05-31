@@ -37,11 +37,14 @@ def verify_webhook_signature(signature: str, payload: bytes) -> bool:
     if not signature:
         return False
 
-    expected_signature = "sha256=" + hmac.new(
-        settings.fb_app_secret.encode(),
-        payload,
-        hashlib.sha256,
-    ).hexdigest()
+    expected_signature = (
+        "sha256="
+        + hmac.new(
+            settings.fb_app_secret.encode(),
+            payload,
+            hashlib.sha256,
+        ).hexdigest()
+    )
     return hmac.compare_digest(signature, expected_signature)
 
 
@@ -57,7 +60,7 @@ async def verify_webhook(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
 
     logger.info("Facebook webhook verified")
-    return int(hub_challenge or "0")
+    return hub_challenge or ""
 
 
 @app.post("/webhook")
@@ -91,7 +94,9 @@ async def receive_facebook_message(request: Request):
                 await send_facebook_message(sender_id, reply)
                 logger.info("Reply sent to %s", sender_id)
             except Exception as exc:
-                logger.error("Error processing Facebook message: %s", exc, exc_info=True)
+                logger.error(
+                    "Error processing Facebook message: %s", exc, exc_info=True
+                )
                 await send_facebook_message(
                     sender_id,
                     "Xin lỗi, hệ thống đang gặp vấn đề. Vui lòng thử lại sau.",

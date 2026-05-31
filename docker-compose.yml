@@ -1,3 +1,17 @@
+x-llm-environment: &llm-environment
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-4o}
+  FALLBACK_MODEL: ${FALLBACK_MODEL:-claude-sonnet-4-5}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+  OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-r1:8b}
+  OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+  OLLAMA_TASK_TYPES: '${OLLAMA_TASK_TYPES:-["classification","summarize","parsing"]}'
+  MONITORING_SERVICE_URL: http://monitoring:8005
+
 services:
   # ──── Infrastructure ────
   postgres:
@@ -46,105 +60,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ──── Application Services ────
-  gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: gateway
-    container_name: agent_gateway
-    ports:
-      - "8000:8000"
-    environment:
-      ENV: ${ENV:-development}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres_password@postgres:5432/agent_db
-      REDIS_URL: redis://redis:6379
-      QDRANT_URL: http://qdrant:6333
-      API_SECRET_KEY: ${API_SECRET_KEY}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      GUARDRAIL_SERVICE_URL: http://guardrail_service:8010
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-    volumes:
-      - ./apps/gateway:/app/apps/gateway
-      - ./shared:/app/shared
-    command: uvicorn apps.gateway.main:app --host 0.0.0.0 --port 8000 --reload
-
-  social:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: social
-    container_name: agent_social
-    ports:
-      - "8002:8002"
-    environment:
-      ENV: ${ENV:-development}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      REDIS_URL: redis://redis:6379
-      QDRANT_URL: http://qdrant:6333
-      FB_PAGE_TOKEN: ${FB_PAGE_TOKEN}
-      FB_VERIFY_TOKEN: ${FB_VERIFY_TOKEN}
-      FB_APP_SECRET: ${FB_APP_SECRET}
-      ZALO_OA_TOKEN: ${ZALO_OA_TOKEN}
-      ZALO_SERVER_KEY: ${ZALO_SERVER_KEY}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    depends_on:
-      redis:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-    volumes:
-      - ./apps/social:/app/apps/social
-      - ./shared:/app/shared
-    command: uvicorn apps.social.main:app --host 0.0.0.0 --port 8002 --reload
-
-  browser:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: browser
-    container_name: agent_browser
-    ports:
-      - "8003:8003"
-    environment:
-      ENV: ${ENV:-development}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - ./apps/browser:/app/apps/browser
-      - ./shared:/app/shared
-    command: uvicorn apps.browser.main:app --host 0.0.0.0 --port 8003 --reload
-
-  computer_use:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: computer_use
-    container_name: agent_computer_use
-    ports:
-      - "8004:8004"
-    environment:
-      ENV: ${ENV:-development}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      DISPLAY: ${DISPLAY}
-    volumes:
-      - ./apps/computer_use:/app/apps/computer_use
-      - ./shared:/app/shared
-      # Mount X11 for desktop access on Linux
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-    command: uvicorn apps.computer_use.main:app --host 0.0.0.0 --port 8004 --reload
-
   ollama:
     image: ollama/ollama:latest
     container_name: agent_ollama
@@ -152,16 +67,7 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # Tự động tải mô hình deepseek-r1:8b khi khởi chạy lần đầu
     entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull deepseek-r1:8b && wait"]
-    # Nếu máy bạn có card đồ họa NVIDIA, bạn có thể bỏ comment block dưới đây để chạy tăng tốc GPU
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
@@ -178,7 +84,41 @@ services:
       - n8n_data:/home/node/.n8n
     restart: unless-stopped
 
-  # ──── Monitoring & Analytics ────
+  # ──── Core Platform Services ────
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gateway
+    container_name: agent_gateway
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres_password@postgres:5432/agent_db
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      API_SECRET_KEY: ${API_SECRET_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      GUARDRAIL_SERVICE_URL: http://guardrail_service:8010
+      APPROVAL_SERVICE_URL: http://approval_service:8011
+      REPORT_AGENT_SERVICE_URL: http://report_agent:8012
+      AIOPS_AGENT_SERVICE_URL: http://aiops_agent:8013
+      RCA_AGENT_SERVICE_URL: http://rca_agent:8014
+      DEVOPS_AGENT_SERVICE_URL: http://devops_agent:8015
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./apps/gateway:/app/apps/gateway
+      - ./shared:/app/shared
+    command: uvicorn apps.gateway.main:app --host 0.0.0.0 --port 8000 --reload
+
   monitoring:
     build:
       context: .
@@ -218,48 +158,90 @@ services:
       - ./apps/dashboard:/app/apps/dashboard
     command: uvicorn apps.dashboard.main:app --host 0.0.0.0 --port 8006 --reload
 
-  rag_service:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: rag_service
-    container_name: agent_rag_service
-    ports:
-      - "8007:8007"
+  # ──── AIOps & Platform Agents ────
+  aiops_agent:
+    build: { context: ., dockerfile: Dockerfile, target: aiops_agent }
+    container_name: agent_aiops_agent
+    ports: ["8013:8013"]
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TOOL_SERVICE_URL: http://tool_service:8008
+    volumes: ["./apps/aiops_agent:/app/apps/aiops_agent", "./shared:/app/shared"]
+    command: uvicorn apps.aiops_agent.main:app --host 0.0.0.0 --port 8013 --reload
+
+  rca_agent:
+    build: { context: ., dockerfile: Dockerfile, target: rca_agent }
+    container_name: agent_rca_agent
+    ports: ["8014:8014"]
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RAG_SERVICE_URL: http://rag_service:8007
+      TOOL_SERVICE_URL: http://tool_service:8008
+      RCA_MAX_REASONING_STEPS: ${RCA_MAX_REASONING_STEPS:-5}
+      ACCURACY_GUARDRAIL_ENABLED: ${ACCURACY_GUARDRAIL_ENABLED:-true}
+    volumes: ["./apps/rca_agent:/app/apps/rca_agent", "./shared:/app/shared"]
+    command: uvicorn apps.rca_agent.main:app --host 0.0.0.0 --port 8014 --reload
+
+  devops_agent:
+    build: { context: ., dockerfile: Dockerfile, target: devops_agent }
+    container_name: agent_devops_agent
+    ports: ["8015:8015"]
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes: ["./apps/devops_agent:/app/apps/devops_agent", "./shared:/app/shared"]
+    command: uvicorn apps.devops_agent.main:app --host 0.0.0.0 --port 8015 --reload
+
+  report_agent:
+    build: { context: ., dockerfile: Dockerfile, target: report_agent }
+    container_name: agent_report_agent
+    ports: ["8012:8012"]
     environment:
       ENV: ${ENV:-development}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
-      OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes: ["./apps/report_agent:/app/apps/report_agent", "./shared:/app/shared"]
+    command: uvicorn apps.report_agent.main:app --host 0.0.0.0 --port 8012 --reload
+
+  email_agent:
+    build: { context: ., dockerfile: Dockerfile, target: email_agent }
+    container_name: agent_email_agent
+    ports: ["8009:8009"]
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
+      TOOL_SERVICE_URL: http://tool_service:8008
+    volumes: ["./apps/email_agent:/app/apps/email_agent", "./shared:/app/shared"]
+    command: uvicorn apps.email_agent.main:app --host 0.0.0.0 --port 8009 --reload
+
+  # ──── Platform Infrastructure Services ────
+  rag_service:
+    build: { context: ., dockerfile: Dockerfile, target: rag_service }
+    container_name: agent_rag_service
+    ports: ["8007:8007"]
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
       QDRANT_URL: http://qdrant:6333
       RAG_COLLECTION: ${RAG_COLLECTION:-rag_documents}
       RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-800}
       RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-100}
       RAG_DEFAULT_TOP_K: ${RAG_DEFAULT_TOP_K:-5}
       RAG_DOCS_PATH: ${RAG_DOCS_PATH:-docs}
+      RAG_VERIFICATION_ENABLED: ${RAG_VERIFICATION_ENABLED:-true}
+      RAG_GRADING_THRESHOLD: ${RAG_GRADING_THRESHOLD:-0.7}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    depends_on:
-      qdrant:
-        condition: service_healthy
-    volumes:
-      - ./services/rag_service:/app/services/rag_service
-      - ./services/__init__.py:/app/services/__init__.py
-      - ./shared:/app/shared
-      - ./docs:/app/docs
-      - ./README.md:/app/README.md
+    volumes: ["./services/rag_service:/app/services/rag_service", "./shared:/app/shared", "./docs:/app/docs", "./README.md:/app/README.md"]
     command: uvicorn services.rag_service.main:app --host 0.0.0.0 --port 8007 --reload
 
   tool_service:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: tool_service
+    build: { context: ., dockerfile: Dockerfile, target: tool_service }
     container_name: agent_tool_service
-    ports:
-      - "8008:8008"
+    ports: ["8008:8008"]
     environment:
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -269,61 +251,84 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       GUARDRAIL_SERVICE_URL: http://guardrail_service:8010
-    volumes:
-      - ./tools:/app/tools
-      - ./shared:/app/shared
-      - ./docs:/app/docs
+    volumes: ["./tools:/app/tools", "./shared:/app/shared", "./docs:/app/docs"]
     command: uvicorn tools.main:app --host 0.0.0.0 --port 8008 --reload
 
   guardrail_service:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: guardrail_service
+    build: { context: ., dockerfile: Dockerfile, target: guardrail_service }
     container_name: agent_guardrail_service
-    ports:
-      - "8010:8010"
+    ports: ["8010:8010"]
     environment:
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - ./services/guardrail_service:/app/services/guardrail_service
-      - ./shared:/app/shared
+    volumes: ["./services/guardrail_service:/app/services/guardrail_service", "./shared:/app/shared"]
     command: uvicorn services.guardrail_service.main:app --host 0.0.0.0 --port 8010 --reload
 
-  email_agent:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: email_agent
-    container_name: agent_email_agent
-    ports:
-      - "8009:8009"
+  approval_service:
+    build: { context: ., dockerfile: Dockerfile, target: approval_service }
+    container_name: agent_approval_service
+    ports: ["8011:8011"]
     environment:
       ENV: ${ENV:-development}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      TOOL_SERVICE_URL: http://tool_service:8008
-    volumes:
-      - ./apps/email_agent:/app/apps/email_agent
+    volumes: 
+      - ./services/approval_service:/app/services/approval_service
       - ./shared:/app/shared
-    command: uvicorn apps.email_agent.main:app --host 0.0.0.0 --port 8009 --reload
+      - ./data:/app/data
+    command: uvicorn services.approval_service.main:app --host 0.0.0.0 --port 8011 --reload
 
-  # ──---- Optional: ngrok for local dev ----
-  # ngrok:
-  #   image: ngrok/ngrok:latest
-  #   container_name: agent_ngrok
-  #   environment:
-  #     NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
-  #   command: http 8000
-  #   ports:
-  #     - "4040:4040"
+  eval_service:
+    build: { context: ., dockerfile: Dockerfile, target: eval_service }
+    container_name: agent_eval_service
+    ports: ["8016:8016"]
+    environment:
+      ENV: ${ENV:-development}
+    volumes: ["./services/eval_service:/app/services/eval_service", "./shared:/app/shared"]
+    command: uvicorn services.eval_service.main:app --host 0.0.0.0 --port 8016 --reload
 
+  # ──── Legacy Personal Agents ────
+  social:
+    build: { context: ., dockerfile: Dockerfile, target: social }
+    container_name: agent_social
+    ports: ["8002:8002"]
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      FB_PAGE_TOKEN: ${FB_PAGE_TOKEN:-}
+      FB_VERIFY_TOKEN: ${FB_VERIFY_TOKEN:-my_webhook_secret}
+      FB_APP_SECRET: ${FB_APP_SECRET:-}
+      ZALO_OA_TOKEN: ${ZALO_OA_TOKEN:-}
+      ZALO_SERVER_KEY: ${ZALO_SERVER_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes: ["./apps/social:/app/apps/social", "./shared:/app/shared"]
+    command: uvicorn apps.social.main:app --host 0.0.0.0 --port 8002 --reload
 
-# ──---- Volumes ----
+  browser:
+    build: { context: ., dockerfile: Dockerfile, target: browser }
+    container_name: agent_browser
+    ports: ["8003:8003"]
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes: ["./apps/browser:/app/apps/browser", "./shared:/app/shared"]
+    command: uvicorn apps.browser.main:app --host 0.0.0.0 --port 8003 --reload
+
+  computer_use:
+    build: { context: ., dockerfile: Dockerfile, target: computer_use }
+    container_name: agent_computer_use
+    ports: ["8004:8004"]
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DISPLAY: ${DISPLAY:-:0}
+    volumes: ["./apps/computer_use:/app/apps/computer_use", "./shared:/app/shared", "/tmp/.X11-unix:/tmp/.X11-unix:rw"]
+    command: uvicorn apps.computer_use.main:app --host 0.0.0.0 --port 8004 --reload
+
 volumes:
   postgres_data:
   redis_data:

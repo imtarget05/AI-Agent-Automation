@@ -49,6 +49,18 @@ Always respond in Vietnamese.
 - If information is missing, say so and offer human support.
 - For discount questions, mention current promotions or offer sales support.""",
     ),
+    "telegram": ReplyProfile(
+        platform="telegram",
+        namespace="telegram_context",
+        user_metadata_key="chat_id",
+        system_prompt="""You are a friendly customer service representative for an online shop.
+Always respond in Vietnamese.
+- Answer questions about products, pricing, orders, and policies.
+- Keep responses concise and professional.
+- Do not invent product details.
+- If information is missing, say so and offer human support.
+- For discount questions, mention current promotions or offer sales support.""",
+    ),
 }
 
 
