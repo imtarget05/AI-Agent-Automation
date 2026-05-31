@@ -142,10 +142,11 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
+    from shared.config import get_bind_host
 
     uvicorn.run(
         "apps.social.facebook:app",
-        host="0.0.0.0",
+        host=get_bind_host(),
         port=8001,
         reload=False,
     )

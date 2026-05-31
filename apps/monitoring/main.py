@@ -579,5 +579,6 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    from shared.config import get_bind_host
 
-    uvicorn.run(app, host="0.0.0.0", port=8005)
+    uvicorn.run(app, host=get_bind_host(), port=8005)

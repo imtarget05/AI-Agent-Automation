@@ -4,6 +4,7 @@ Computer Use Module API
 
 import logging
 from fastapi import FastAPI, HTTPException, status
+from shared.config import get_bind_host
 from contextlib import asynccontextmanager
 
 from shared.models import ComputerTask, ComputerResult
@@ -142,7 +143,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host=get_bind_host(),
         port=8004,
         reload=False,
     )

@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 from pydantic import Field, model_validator
 from functools import lru_cache
 from typing import Optional
+import os
 
 
 PLACEHOLDER_SECRETS = frozenset(
@@ -19,6 +20,9 @@ PLACEHOLDER_SECRETS = frozenset(
         "your-api-key",
         "your-slack-signing-secret",
         "your-super-secret-key-change-this",
+        "my_webhook_secret",
+        "postgres_password",
+        "your_api_key",
     }
 )
 
@@ -31,7 +35,12 @@ def _is_placeholder_secret(value: str) -> bool:
         or "placeholder" in normalized
         or normalized.startswith("your-")
         or normalized.startswith("your_")
+        or (normalized.startswith("sk-") and len(normalized) < 10)
     )
+
+
+def _is_localhost(url: str) -> bool:
+    return "localhost" in url.lower() or "127.0.0.1" in url
 
 
 class Settings(BaseSettings):
@@ -114,8 +123,12 @@ class Settings(BaseSettings):
         default="change-me-in-production", description="Secret key for JWT"
     )
     cors_origins: list[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8000"],
+        default=["*"],
         description="CORS allowed origins",
+    )
+    dashboard_gateway_url: str = Field(
+        default="http://localhost:8000",
+        description="Public Gateway URL for the dashboard browser client",
     )
 
     # ──── Observability ────
@@ -234,6 +247,23 @@ class Settings(BaseSettings):
             raise ValueError(
                 "At least one usable LLM provider must be configured in production"
             )
+
+        # Ensure internal service URLs don't point to localhost in production
+        service_urls = [
+            self.gateway_service_url,
+            self.rag_service_url,
+            self.tool_service_url,
+            self.guardrail_service_url,
+            self.monitoring_service_url,
+            self.approval_service_url,
+        ]
+        for url in service_urls:
+            if _is_localhost(url):
+                raise ValueError(
+                    f"Service URL '{url}' cannot point to localhost in production. "
+                    "Use container names or internal load balancer addresses."
+                )
+
         return self
 
     class Config:
@@ -257,3 +287,15 @@ def get_database_url() -> str:
 def get_redis_url() -> str:
     """Get Redis URL"""
     return get_settings().redis_url
+
+
+def get_bind_host() -> str:
+    """Return the bind host for uvicorn. Default to 127.0.0.1 unless BIND_ALL env var set.
+
+    CI security scanners flag hardcoded 0.0.0.0 binds; prefer localhost unless explicitly allowed.
+    Use BIND_ALL=1 or BIND_ALL=true in container environments to allow 0.0.0.0.
+    """
+    val = os.getenv("BIND_ALL", "false").lower()
+    if val in ("1", "true", "yes"):
+        return "0.0.0.0"
+    return "127.0.0.1"

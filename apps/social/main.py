@@ -73,10 +73,11 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
+    from shared.config import get_bind_host
 
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host=get_bind_host(),
         port=8002,
         reload=False,
     )
