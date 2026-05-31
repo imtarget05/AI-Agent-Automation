@@ -1,0 +1,62 @@
+repos:
+  # ── Ruff: lint + format (replaces flake8, isort, black) ──────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        name: "ruff lint"
+        args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python, pyi, jupyter]
+      - id: ruff-format
+        name: "ruff format"
+        types_or: [python, pyi, jupyter]
+
+  # ── Basic file hygiene ────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]       # allow custom YAML tags (GitHub Actions)
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key   # catch accidental key commits
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, master]
+
+  # ── Security: catch secrets before they ship ──────────────────────────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: "detect secrets"
+        args: [--baseline, .secrets.baseline]
+        exclude: ".env.example|tests/"
+
+  # ── Type checking (non-blocking by default, warnings only) ───────────────
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        name: "mypy type check"
+        additional_dependencies:
+          - pydantic
+          - fastapi
+          - httpx
+        args: [--ignore-missing-imports, --no-error-summary]
+        pass_filenames: false
+        always_run: false      # run manually: pre-commit run mypy --all-files
+
+default_language_version:
+  python: python3.10
+
+default_stages: [pre-commit]
+
+ci:
+  autofix_commit_msg: "style: auto-fix lint and format [pre-commit.ci]"
+  autoupdate_commit_msg: "chore: bump pre-commit hook versions [pre-commit.ci]"
+  skip: [mypy]  # skip expensive type check in CI auto-run
