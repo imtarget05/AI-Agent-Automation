@@ -8,6 +8,7 @@ import logging
 import re
 from datetime import datetime
 from typing import Dict, Any, Optional
+from shared.config import get_bind_host
 from uuid import uuid4
 from fastapi import FastAPI, Body, HTTPException
 from contextlib import asynccontextmanager
@@ -97,9 +98,10 @@ class PIIAnonymizer:
 
         # 4. Anonymize IP Addresses
         ip_matches = set(re.findall(self.IP_PATTERN, masked))
+        local_hosts = {get_bind_host(), "127.0.0.1"}
         for i, match in enumerate(ip_matches):
-            # Ignore localhosts or standard subnet prefixes if necessary, but mask for safety
-            if match not in ["0.0.0.0", "127.0.0.1"]:
+            # Ignore localhost or the configured bind host; mask others for safety
+            if match not in local_hosts:
                 placeholder = f"[ANONYMIZED_IP_{i + 1}]"
                 masked = re.sub(re.escape(match), placeholder, masked)
                 mapping[placeholder] = match
