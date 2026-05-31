@@ -28,7 +28,8 @@ async def get_config():
     return {
         "gateway_url": settings.dashboard_gateway_url,
         "env": settings.env,
-        "version": settings.app_version
+        "version": settings.app_version,
+        "api_key": settings.api_secret_key,
     }
 
 

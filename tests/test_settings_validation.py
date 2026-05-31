@@ -10,6 +10,12 @@ def _production_settings(**overrides) -> Settings:
         "env": "production",
         "api_secret_key": "prod-api-secret",
         "openai_api_key": "sk-live-openai",
+        "gateway_service_url": "http://gateway:8000",
+        "rag_service_url": "http://rag_service:8007",
+        "tool_service_url": "http://tool_service:8008",
+        "guardrail_service_url": "http://guardrail_service:8010",
+        "monitoring_service_url": "http://monitoring:8005",
+        "approval_service_url": "http://approval_service:8011",
     }
     values.update(overrides)
     return Settings(**values)
@@ -19,7 +25,10 @@ def test_development_defaults_remain_backward_compatible():
     settings = Settings(_env_file=None)
 
     assert settings.env in ("development", "testing")
-    assert settings.api_secret_key in ("change-me-in-production", "test-integration-key")
+    assert settings.api_secret_key in (
+        "change-me-in-production",
+        "test-integration-key",
+    )
 
 
 def test_staging_keeps_backward_compatible_defaults():
