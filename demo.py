@@ -105,7 +105,7 @@ async def step_guardrail_check(client: httpx.AsyncClient) -> None:
         try:
             resp = await client.post(
                 f"{GATEWAY_URL}/execute",
-                json={"user_input": prompt, "modules": ["GUARDRAIL"]},
+                json={"user_input": prompt, "modules": ["guardrail"]},
                 headers=HEADERS,
                 timeout=30,
             )
@@ -196,7 +196,7 @@ async def step_async_task(client: httpx.AsyncClient) -> str | None:
                     "Quick health check: list the top 3 anomalies in the "
                     "payment-api service based on available metrics."
                 ),
-                "modules": ["AIOPS", "TOOL"],
+                "modules": ["aiops", "tool"],
             },
             headers=HEADERS,
             timeout=15,

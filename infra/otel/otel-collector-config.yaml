@@ -46,6 +46,11 @@ exporters:
     tls:
       insecure: true
 
+  # Prometheus exporter
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    send_timestamps: true
+
   # Debug exporter for quick debugging
   debug:
     verbosity: detailed
@@ -57,8 +62,15 @@ extensions:
 
 service:
   extensions: [health_check, zpages]
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, attributes, batch]
       exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus, debug]

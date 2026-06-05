@@ -127,6 +127,20 @@ def _is_transient(exc: Exception) -> bool:
 def _sandbox_demo_response(messages: list[dict]) -> str:
     """Return a clearly labeled local-only demo response."""
     query = messages[-1].get("content", "").lower() if messages else ""
+
+    # If the system prompt is present and asks for JSON (supervisor/planning)
+    is_planning = any(
+        "valid json" in str(m.get("content", "")).lower() for m in messages
+    )
+
+    if is_planning:
+        return """{
+  "analysis": "I will analyze the payment-api incident by checking metrics and root causes.",
+  "action": "SYNTHESIZE",
+  "tasks": [],
+  "final_answer": "[SANDBOX DEMO] Incident analysis suggests a transient spike in CPU usage. All sub-services are currently healthy."
+}"""
+
     if "runbook" in query or "cpu" in query:
         return """[SANDBOX DEMO RESPONSE]
 High CPU incident example:

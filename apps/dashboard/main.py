@@ -18,9 +18,6 @@ settings = get_settings()
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
-if os.path.exists(static_dir):
-    app.mount("/assets", StaticFiles(directory=static_dir), name="assets")
-
 
 @app.get("/config")
 async def get_config():
@@ -31,32 +28,14 @@ async def get_config():
         "version": settings.app_version,
     }
 
-
-@app.get("/", include_in_schema=False)
-async def serve_dashboard():
-    """Serve the main dashboard"""
-    index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return {
-        "message": "Dashboard assets not found. Run npm build in dashboard directory."
-    }
-
-
-@app.get("/architecture", include_in_schema=False)
-async def serve_architecture():
-    """Serve the interactive architecture diagram"""
-    arch_path = os.path.join(os.path.dirname(__file__), "static", "architecture.html")
-    if os.path.exists(arch_path):
-        return FileResponse(arch_path)
-    return {"message": "Architecture visualization assets not found."}
-
-
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "ok", "service": "dashboard"}
+
+# Mount static files at root after explicit API routes
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 
 if __name__ == "__main__":
