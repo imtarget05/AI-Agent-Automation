@@ -54,24 +54,27 @@ async def receive_zalo_message(request: Request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
 
     data = json.loads(body)
-    logger.info("Received Zalo webhook: %s", json.dumps(data, indent=2))
+    logger.info(
+        "Received Zalo webhook event: %s",
+        data.get("event_name", "unknown"),
+    )
 
     event_name = data.get("event_name")
     if event_name == "user_send_text":
         user_id = data["sender"]["id"]
         text = data["message"]["text"]
-        logger.info("Message from %s: %s", user_id, text)
+        logger.info("Received text Zalo message")
 
         try:
             reply = await generate_reply(text, user_id)
             await send_zalo_message(user_id, reply)
-            logger.info("Reply sent to %s", user_id)
+            logger.info("Zalo reply sent")
         except Exception as exc:
             logger.error("Error processing Zalo message: %s", exc, exc_info=True)
 
     elif event_name == "user_send_file":
         user_id = data["sender"]["id"]
-        logger.info("User %s sent a file", user_id)
+        logger.info("Received Zalo file message")
         await send_zalo_message(
             user_id,
             "Cảm ơn bạn đã gửi tệp. Chúng tôi sẽ xử lý trong thời gian sớm nhất.",
@@ -104,7 +107,7 @@ async def send_zalo_message(user_id: str, text: str):
     async with httpx.AsyncClient(timeout=10) as client:
         response = await client.post(url, headers=headers, json=payload)
         response.raise_for_status()
-        logger.info("Zalo message sent to %s", user_id)
+        logger.info("Zalo message sent")
 
 
 @app.get("/health")

@@ -1,6 +1,7 @@
 from typing import Any, Optional, List
 import httpx
 from shared.config import get_settings
+from shared.internal_auth import get_internal_service_headers
 
 
 class ApprovalServiceError(RuntimeError):
@@ -68,6 +69,13 @@ class ApprovalClient:
             },
         )
 
+    async def claim_execution(self, approval_id: str) -> dict:
+        """Atomically mark an approved action as running before dispatch."""
+        return await self._request(
+            "POST",
+            f"/approvals/{approval_id}/execution/start",
+        )
+
     async def _request(
         self,
         method: str,
@@ -77,7 +85,12 @@ class ApprovalClient:
         url = f"{self.base_url}/{path.lstrip('/')}"
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.request(method, url, json=json)
+                response = await client.request(
+                    method,
+                    url,
+                    json=json,
+                    headers=get_internal_service_headers(),
+                )
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPStatusError as exc:

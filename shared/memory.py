@@ -25,7 +25,10 @@ class LongTermMemory:
     COLLECTION = "agent_memory"
 
     def __init__(self):
-        self.client = AsyncQdrantClient(url=settings.qdrant_url)
+        self.client = AsyncQdrantClient(
+            url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key or None,
+        )
         self.router = get_llm_router()
         self._initialized = False
         self._init_lock = asyncio.Lock()
@@ -52,7 +55,11 @@ class LongTermMemory:
                 await self.init()
 
     async def save(
-        self, text: str, metadata: Optional[dict] = None, namespace: str = "general"
+        self,
+        text: str,
+        metadata: Optional[dict] = None,
+        namespace: str = "general",
+        point_id: Optional[str] = None,
     ) -> str:
         """
         Save memory with embedding
@@ -67,7 +74,7 @@ class LongTermMemory:
         """
         await self._ensure_initialized()
         vector = await self.router.embed(text)
-        point_id = str(uuid.uuid4())
+        point_id = point_id or str(uuid.uuid4())
 
         payload = {
             "text": text,
@@ -139,6 +146,9 @@ class SessionMemory:
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.key = f"session:{session_id}"
+        # In-memory fallback when Redis is unavailable (local dev)
+        self._local_history: list[dict] = []
+        self._local_approved: list[str] = []
 
     async def _get_redis(self) -> aioredis.Redis:
         """Get Redis connection"""
@@ -146,22 +156,31 @@ class SessionMemory:
 
     async def append(self, role: str, content: str):
         """Append message to session history"""
-        redis = await self._get_redis()
         try:
+            redis = await self._get_redis()
             history = await self.get()
             message = ChatMessage(role=role, content=content)
             history.append(message.model_dump())
 
             # Keep max 50 messages per session
             await redis.setex(self.key, self.TTL, json.dumps(history[-50:]))
-        finally:
             await redis.aclose()
+        except Exception:  # pragma: no cover - runtime resilience
+            # Redis unavailable; use in-memory fallback for local development
+            try:
+                message = ChatMessage(role=role, content=content)
+                self._local_history.append(message.model_dump())
+                # Keep max 50 messages
+                self._local_history = self._local_history[-50:]
+            except Exception:
+                pass
 
     async def get(self) -> list[dict]:
         """Get session history"""
-        redis = await self._get_redis()
         try:
+            redis = await self._get_redis()
             data = await redis.get(self.key)
+            await redis.aclose()
             raw = json.loads(data) if data else []
             normalized = []
             for item in raw:
@@ -171,8 +190,9 @@ class SessionMemory:
                 except Exception:
                     continue
             return normalized
-        finally:
-            await redis.aclose()
+        except Exception:  # pragma: no cover - runtime resilience
+            # Redis unavailable; return in-memory fallback
+            return list(self._local_history)
 
     async def clear(self):
         """Clear session history"""
@@ -189,25 +209,28 @@ class SessionMemory:
 
     async def get_approved_tasks(self) -> list[str]:
         """Get list of approved task IDs for this session"""
-        redis = await self._get_redis()
         try:
+            redis = await self._get_redis()
             data = await redis.get(f"{self.key}:approved")
-            return json.loads(data) if data else []
-        finally:
             await redis.aclose()
+            return json.loads(data) if data else []
+        except Exception:  # pragma: no cover - runtime resilience
+            return list(self._local_approved)
 
     async def add_approved_task(self, task_id: str):
         """Add a task ID to the approved list"""
-        redis = await self._get_redis()
         try:
+            redis = await self._get_redis()
             approved = await self.get_approved_tasks()
             if task_id not in approved:
                 approved.append(task_id)
                 await redis.setex(
                     f"{self.key}:approved", self.TTL, json.dumps(approved)
                 )
-        finally:
             await redis.aclose()
+        except Exception:  # pragma: no cover - runtime resilience
+            if task_id not in self._local_approved:
+                self._local_approved.append(task_id)
 
 
 # Global instances

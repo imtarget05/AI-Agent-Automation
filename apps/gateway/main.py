@@ -3,15 +3,14 @@ FastAPI Gateway - Main entry point for all requests
 """
 
 import uuid
-import logging
-import json
-from pathlib import Path
+import asyncio
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Optional
 
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -19,13 +18,29 @@ from pydantic import BaseModel, Field
 from shared.approvals import ApprovalClient, ApprovalServiceError
 from shared.config import get_settings
 from shared.guardrails import GuardrailClient, GuardrailServiceError
-from shared.models import ModuleType, TaskRequest, TaskResponse, TaskStatus
+from shared.open_source_knowledge import seed_open_source_knowledge
+from shared.models import ModuleType, TaskRequest, TaskResponse
 from shared.memory import get_long_term_memory
+from shared.mcp import get_mcp_manager
+from shared.internal_auth import get_internal_service_headers
+from shared import job_store as job_store_module
+from shared.url_security import validate_outbound_http_url
+from shared.observability.tracing import (
+    get_current_trace_id,
+    init_tracing,
+    instrument_fastapi,
+    start_span,
+)
+from shared.observability.logging import (
+    clear_log_context,
+    configure_logging,
+    get_logger,
+    set_log_context,
+)
 from apps.gateway.orchestrator import get_orchestrator
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+configure_logging(service="gateway")
+logger = get_logger(__name__)
 
 settings = get_settings()
 guardrail_client = GuardrailClient()
@@ -35,35 +50,6 @@ SELF_HEALING_ACTIONS = {
     "scale_deployment",
     "delete_pod",
 }
-TASK_STORE_PATH = Path("data/gateway_tasks.json")
-TASK_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-_task_store: dict[str, dict[str, Any]] = {}
-
-
-def _load_task_store() -> None:
-    """Load async task state from disk if available."""
-    global _task_store
-    if not TASK_STORE_PATH.exists():
-        _task_store = {}
-        return
-
-    try:
-        _task_store = json.loads(TASK_STORE_PATH.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.warning("Failed to load task store: %s", exc)
-        _task_store = {}
-
-
-def _save_task_store() -> None:
-    """Persist async task state to disk."""
-    try:
-        TASK_STORE_PATH.write_text(
-            json.dumps(_task_store, indent=2, ensure_ascii=True), encoding="utf-8"
-        )
-    except Exception as exc:
-        logger.warning("Failed to save task store: %s", exc)
-
-
 def _serialize_task_response(result: dict[str, Any]) -> dict[str, Any]:
     """Store only JSON-safe task response data."""
 
@@ -84,6 +70,7 @@ def _serialize_task_response(result: dict[str, Any]) -> dict[str, Any]:
 async def _notify_callback(callback_url: str, payload: dict[str, Any]) -> None:
     """Best-effort callback delivery for async task completion."""
     try:
+        await validate_outbound_http_url(callback_url)
         async with httpx.AsyncClient(
             timeout=settings.agent_http_timeout_seconds
         ) as client:
@@ -101,15 +88,54 @@ async def _notify_callback(callback_url: str, payload: dict[str, Any]) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic"""
+    # Initialise observability before anything else so startup spans are captured
+    init_tracing(service_name=settings.otel_service_name, enabled=settings.otel_enabled)
+    instrument_fastapi(app)
+
     logger.info("🚀 Starting Personal AI Agent Gateway")
-    _load_task_store()
+    # Register MCP servers without spawning subprocesses. Connections stay lazy.
+    mcp_manager = get_mcp_manager()
+    if settings.mcp_enabled:
+        for name, config in settings.mcp_servers.items():
+            try:
+                await mcp_manager.register_server(
+                    name=name,
+                    command=config["command"],
+                    args=config.get("args"),
+                    env=config.get("env"),
+                )
+            except Exception as exc:
+                logger.error("Failed to register MCP server %s: %s", name, exc)
+
     # Initialize long-term memory collection
     try:
         await get_long_term_memory().init()
     except Exception as e:
         logger.warning(f"Long-term memory init failed: {e}")
+
+    async def _seed_open_source() -> None:
+        try:
+            seeded = await seed_open_source_knowledge(
+                force=settings.open_source_seed_force,
+            )
+            logger.info(
+                "Seeded open-source knowledge: %d repo docs, %d chunks",
+                seeded.get("repos_indexed", 0),
+                seeded.get("chunks_indexed", 0),
+            )
+        except Exception as e:
+            logger.warning(f"Open-source knowledge seeding failed: {e}")
+
+    if settings.open_source_seed_enabled:
+        if settings.open_source_seed_background:
+            asyncio.create_task(_seed_open_source())
+        else:
+            await _seed_open_source()
+
     yield
+    # Shutdown logic
     logger.info("🛑 Shutting down")
+    await get_mcp_manager().close_all()
 
 
 # ──── Create App ────
@@ -130,6 +156,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def correlation_context_middleware(request: Request, call_next):
+    """Attach request correlation IDs to logs, response headers, and spans."""
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    workflow_id = request.headers.get("x-workflow-id", "")
+    session_id = request.headers.get("x-session-id", "")
+    tenant_id = request.headers.get("x-tenant-id", "")
+    user_id = request.headers.get("x-user-id", "")
+
+    set_log_context(
+        request_id=request_id,
+        workflow_id=workflow_id,
+        session_id=session_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    with start_span(
+        "gateway.http_request",
+        {
+            "request_id": request_id,
+            "workflow_id": workflow_id,
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "http.method": request.method,
+            "http.route": request.url.path,
+        },
+    ) as span:
+        try:
+            response = await call_next(request)
+            span.set_attribute("status", "success")
+            span.set_attribute("http.status_code", response.status_code)
+            response.headers["x-request-id"] = request_id
+            if workflow_id:
+                response.headers["x-workflow-id"] = workflow_id
+            if trace_id := get_current_trace_id():
+                response.headers["x-trace-id"] = trace_id
+            return response
+        except Exception as exc:
+            span.set_attribute("status", "error")
+            span.set_attribute("error_type", type(exc).__name__)
+            raise
+        finally:
+            clear_log_context()
+
 # ──── Security ────
 security = HTTPBearer()
 
@@ -138,15 +210,18 @@ async def verify_api_key(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> str:
     """Verify API key from Authorization header"""
-    if credentials.credentials != get_settings().api_secret_key:
+    if not secrets.compare_digest(
+        credentials.credentials,
+        get_settings().api_secret_key,
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key"
         )
     return credentials.credentials
 
 
-async def ensure_safe_input(prompt: str) -> None:
-    """Reject unsafe prompts before they reach the orchestration LLM."""
+async def ensure_safe_input(prompt: str) -> str:
+    """Reject unsafe prompts and return the masked form for downstream LLMs."""
     try:
         verdict = await guardrail_client.guard_input(prompt)
     except GuardrailServiceError as exc:
@@ -157,6 +232,7 @@ async def ensure_safe_input(prompt: str) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=verdict.get("reason", "Input rejected by guardrail service"),
         )
+    return verdict.get("anonymized_prompt") or prompt
 
 
 # ──── Health Check ────
@@ -175,6 +251,14 @@ async def health_check():
 # ──── Incident Analysis ────
 
 
+@app.get("/mcp/tools")
+async def list_mcp_tools(api_key: str = Depends(verify_api_key)):
+    """List tools from configured MCP servers, including connection errors."""
+    if not settings.mcp_enabled:
+        raise HTTPException(status_code=404, detail="MCP integration is disabled")
+    return await get_mcp_manager().inspect_tools()
+
+
 class IncidentRequest(BaseModel):
     incident_data: dict
     session_id: Optional[str] = None
@@ -188,12 +272,16 @@ async def analyze_incident(
     """
     Analyze an incident using AIOps, RCA, RAG, and Tool agents.
     """
-    logger.info("Received incident for analysis: %s", request.incident_data)
+    logger.info(
+        "Received incident for analysis with fields: %s",
+        sorted(request.incident_data),
+    )
 
     # We convert the structured JSON into a natural language request for the manager
     # Or bypass manager and execute an AIOps workflow directly.
     # For now, we will construct a prompt for the manager to plan the workflow.
     user_input = f"Incident occurred: {request.incident_data}. Please analyze anomalies, find root cause, and draft an email report."
+    sanitized_input = await ensure_safe_input(user_input)
 
     session_id = request.session_id or str(uuid.uuid4())
     orchestrator = get_orchestrator()
@@ -211,7 +299,7 @@ async def analyze_incident(
     start_time = datetime.utcnow()
     try:
         result = await orchestrator.execute(
-            user_input=user_input,
+            user_input=sanitized_input,
             session_id=session_id,
             allowed_modules=allowed_modules,
         )
@@ -249,12 +337,12 @@ async def execute_task(
     """
     session_id = request.session_id or str(uuid.uuid4())
     start_time = datetime.utcnow()
-    await ensure_safe_input(request.user_input)
+    sanitized_input = await ensure_safe_input(request.user_input)
 
     try:
         orchestrator = get_orchestrator()
         result = await orchestrator.execute(
-            request.user_input,
+            sanitized_input,
             session_id,
             allowed_modules=request.modules,
         )
@@ -304,46 +392,34 @@ async def execute_task_async(
     """
     session_id = request.session_id or str(uuid.uuid4())
     task_id = str(uuid.uuid4())
-    await ensure_safe_input(request.user_input)
+    sanitized_input = await ensure_safe_input(request.user_input)
+    if request.callback_url:
+        try:
+            await validate_outbound_http_url(request.callback_url)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    _task_store[task_id] = {
-        "task_id": task_id,
-        "session_id": session_id,
-        "status": TaskStatus.PENDING.value,
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat(),
-        "user_input": request.user_input,
-        "callback_url": request.callback_url,
-        "modules": [module.value for module in request.modules]
-        if request.modules
-        else None,
-        "result": None,
-        "error": None,
-    }
-    _save_task_store()
+    job_store = job_store_module.get_job_store()
+    await job_store.create(task_id, sanitized_input, session_id)
 
     async def run_task():
         """Run in background"""
-        _task_store[task_id]["status"] = TaskStatus.RUNNING.value
-        _task_store[task_id]["updated_at"] = datetime.utcnow().isoformat()
-        _save_task_store()
+        started_at = datetime.utcnow()
+        await job_store.mark_running(task_id)
 
         orchestrator = get_orchestrator()
         try:
             run_result = await orchestrator.execute(
-                request.user_input,
+                sanitized_input,
                 session_id,
                 allowed_modules=request.modules,
             )
-            _task_store[task_id].update(
-                {
-                    "status": TaskStatus.COMPLETED.value,
-                    "result": _serialize_task_response(run_result),
-                    "error": run_result.get("error"),
-                    "updated_at": datetime.utcnow().isoformat(),
-                }
+            serialized_result = _serialize_task_response(run_result)
+            await job_store.mark_done(
+                task_id,
+                serialized_result,
+                (datetime.utcnow() - started_at).total_seconds(),
             )
-            _save_task_store()
 
             if request.callback_url:
                 await _notify_callback(
@@ -351,21 +427,14 @@ async def execute_task_async(
                     {
                         "task_id": task_id,
                         "session_id": session_id,
-                        "status": TaskStatus.COMPLETED.value,
-                        "result": _serialize_task_response(run_result),
+                        "status": "completed",
+                        "result": serialized_result,
                         "error": run_result.get("error"),
                     },
                 )
         except Exception as exc:
             logger.error("Async task %s failed: %s", task_id, exc, exc_info=True)
-            _task_store[task_id].update(
-                {
-                    "status": TaskStatus.FAILED.value,
-                    "error": str(exc),
-                    "updated_at": datetime.utcnow().isoformat(),
-                }
-            )
-            _save_task_store()
+            await job_store.mark_error(task_id, str(exc))
 
             if request.callback_url:
                 await _notify_callback(
@@ -373,7 +442,7 @@ async def execute_task_async(
                     {
                         "task_id": task_id,
                         "session_id": session_id,
-                        "status": TaskStatus.FAILED.value,
+                        "status": "failed",
                         "result": None,
                         "error": str(exc),
                     },
@@ -385,9 +454,11 @@ async def execute_task_async(
 
     return {
         "task_id": task_id,
+        "job_id": task_id,
         "session_id": session_id,
         "status": "queued",
-        "message": f"Task queued. Poll /task-status/{task_id} for results",
+        "poll_url": f"/tasks/{task_id}",
+        "message": f"Task queued. Poll /tasks/{task_id} for results",
     }
 
 
@@ -397,11 +468,20 @@ async def get_task_status(
     api_key: str = Depends(verify_api_key),
 ):
     """Get status of async task"""
-    task = _task_store.get(task_id)
+    task = await job_store_module.get_job_store().get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    return task
+    return task.model_dump(mode="json")
+
+
+@app.get("/tasks/{task_id}")
+async def get_task(
+    task_id: str,
+    api_key: str = Depends(verify_api_key),
+):
+    """Return an async job record from the TTL-backed store."""
+    return await get_task_status(task_id, api_key)
 
 
 # ---- Human Approval Workflow ----
@@ -453,6 +533,7 @@ async def _execute_approved_self_healing_action(
             response = await client.post(
                 f"{settings.tool_service_url.rstrip('/')}/k8s/actions/execute",
                 json=payload,
+                headers=get_internal_service_headers(),
             )
             response.raise_for_status()
             result = response.json()
@@ -685,6 +766,7 @@ async def root():
             "self_healing_approvals": "POST /self-healing/approvals (requires API key)",
             "session": "POST /session",
             "history": "GET /session/{session_id}/history",
+            "mcp_tools": "GET /mcp/tools (requires API key)",
         },
         "docs": "/docs",
         "openapi": "/openapi.json",

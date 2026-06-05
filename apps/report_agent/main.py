@@ -17,9 +17,13 @@ from typing import Any, Dict, Optional
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from shared.internal_auth import add_internal_auth_middleware
+from shared.llm import get_llm_router
 
 app = FastAPI(title="Report Agent")
+add_internal_auth_middleware(app)
 logger = logging.getLogger(__name__)
+llm_router = get_llm_router()
 
 
 class TaskRequest(BaseModel):
@@ -118,7 +122,11 @@ async def execute_task(req: TaskRequest):
     rca_conclusion: Optional[str] = ctx.get("rca_conclusion") or ctx.get(
         "final_conclusion"
     )
-    anomalies: Optional[list] = ctx.get("anomalies") or ctx.get("detected_anomalies")
+    anomalies: Optional[list] = (
+        ctx.get("anomalies")
+        or ctx.get("detected_anomalies")
+        or ctx.get("anomalies_detected")
+    )
     incident_data: Optional[dict] = ctx.get("incident_data")
     severity: str = ctx.get("severity", "medium")
 
@@ -129,6 +137,17 @@ async def execute_task(req: TaskRequest):
         severity=severity,
         instruction=req.instruction,
     )
+
+    # Use LLM to refine and generate the final report draft
+    prompt = f"Refine the following incident report draft to make it professional and concise:\n\n{report_md}"
+    try:
+        report_md = await llm_router.chat(
+            messages=[{"role": "user", "content": prompt}],
+            task="report_draft",
+            agent_name="report_agent"
+        )
+    except Exception as e:
+        logger.error(f"Failed to refine report draft with LLM: {e}")
 
     # Minimal HTML conversion — for rich rendering in dashboards
     report_html = (

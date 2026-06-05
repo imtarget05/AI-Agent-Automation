@@ -145,6 +145,18 @@ def test_create_session(client):
 
 
 @pytest.mark.unit
+def test_mcp_inventory_is_empty_until_servers_are_configured(client):
+    response = client.get("/mcp/tools", headers=_auth_header())
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "servers": [],
+        "tools": [],
+        "errors": {},
+    }
+
+
+@pytest.mark.unit
 def test_execute_async_returns_job_id(client):
     """POST /execute-async must return a job_id immediately."""
     with patch("apps.gateway.main.get_orchestrator") as mock_orch:

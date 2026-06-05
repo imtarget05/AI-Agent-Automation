@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 from typing import Any, Dict, Optional
 
@@ -8,10 +7,21 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from shared.config import get_settings
+from shared.cost.token_budget import BudgetExceededError
 from shared.llm import get_llm_router
+from shared.internal_auth import (
+    add_internal_auth_middleware,
+    get_internal_service_headers,
+)
+from shared.observability.logging import get_logger
+from shared.observability.tracing import (
+    inject_trace_context,
+    start_span,
+)
 
 app = FastAPI(title="RCA Agent")
-logger = logging.getLogger(__name__)
+add_internal_auth_middleware(app)
+logger = get_logger(__name__)
 settings = get_settings()
 llm_router = get_llm_router()
 
@@ -22,8 +32,13 @@ class TaskRequest(BaseModel):
 
 
 async def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    headers = {**get_internal_service_headers(), **inject_trace_context()}
     async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.post(url, json=payload)
+        response = await client.post(
+            url,
+            json=payload,
+            headers=headers,
+        )
         response.raise_for_status()
         return response.json()
 
@@ -32,6 +47,9 @@ async def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 async def execute_task(req: TaskRequest):
     """Run a bounded RCA reasoning loop with read-only evidence gathering."""
     logger.info("RCA Agent received task: %s", req.instruction)
+    context = req.context or {}
+    workflow_id = str(context.get("workflow_id", ""))
+    session_id = str(context.get("session_id", ""))
     system_prompt = """You are a Root Cause Analysis (RCA) expert.
 Gather evidence and reason step by step. Available actions:
 1. RAG_SEARCH: {"action": "RAG_SEARCH", "query": "search query"}
@@ -54,7 +72,24 @@ provide it in a FINAL_ANSWER block.
     try:
         for current_step in range(1, settings.rca_max_reasoning_steps + 1):
             logger.info("[RCA] Step %s", current_step)
-            response = await llm_router.chat(messages, task="analysis")
+            with start_span(
+                "rca.reasoning_step",
+                {
+                    "workflow_id": workflow_id,
+                    "session_id": session_id,
+                    "agent_name": "rca_agent",
+                    "step": current_step,
+                },
+            ) as span:
+                response = await llm_router.chat(
+                    messages,
+                    task="analysis",
+                    workflow_id=workflow_id,
+                    session_id=session_id,
+                    agent_name="rca_agent",
+                    estimated_tokens=1200,
+                )
+                span.set_attribute("status", "llm_completed")
             history.append({"step": current_step, "response": response})
             messages.append({"role": "assistant", "content": response})
 
@@ -81,22 +116,55 @@ provide it in a FINAL_ANSWER block.
                 action_type = action.get("action")
 
                 if action_type == "RAG_SEARCH":
-                    result = await _post_json(
-                        f"{settings.rag_service_url.rstrip('/')}/retrieve",
-                        {"query": action.get("query", ""), "top_k": 3},
-                    )
+                    with start_span(
+                        "rag.retrieval",
+                        {
+                            "workflow_id": workflow_id,
+                            "session_id": session_id,
+                            "agent_name": "rca_agent",
+                            "tool_name": "rag.retrieve",
+                        },
+                    ):
+                        result = await _post_json(
+                            f"{settings.rag_service_url.rstrip('/')}/retrieve",
+                            {
+                                "query": action.get("query", ""),
+                                "top_k": 3,
+                                "namespace": context.get("namespace", "docs"),
+                                "workflow_id": workflow_id,
+                                "session_id": session_id,
+                            },
+                        )
                     observation = str(result.get("results", []))
                 elif action_type == "AIOPS_LOOKUP":
-                    result = await _post_json(
-                        f"{settings.aiops_agent_service_url.rstrip('/')}/execute",
-                        {"instruction": action.get("instruction", "")},
-                    )
+                    with start_span(
+                        "tool.call",
+                        {
+                            "workflow_id": workflow_id,
+                            "session_id": session_id,
+                            "agent_name": "rca_agent",
+                            "tool_name": "aiops.lookup",
+                        },
+                    ):
+                        result = await _post_json(
+                            f"{settings.aiops_agent_service_url.rstrip('/')}/execute",
+                            {"instruction": action.get("instruction", "")},
+                        )
                     observation = str(result.get("data", result))
                 elif action_type == "TOOL_CALL":
-                    result = await _post_json(
-                        f"{settings.tool_service_url.rstrip('/')}/execute",
-                        {"instruction": action.get("instruction", "")},
-                    )
+                    with start_span(
+                        "tool.call",
+                        {
+                            "workflow_id": workflow_id,
+                            "session_id": session_id,
+                            "agent_name": "rca_agent",
+                            "tool_name": "tool.read_only",
+                        },
+                    ):
+                        result = await _post_json(
+                            f"{settings.tool_service_url.rstrip('/')}/execute",
+                            {"instruction": action.get("instruction", "")},
+                        )
                     observation = str(result)
                 else:
                     observation = f"Unsupported RCA action: {action_type}"
@@ -117,6 +185,9 @@ provide it in a FINAL_ANSWER block.
             "history": history,
             "final_conclusion": "Incomplete analysis.",
         }
+    except BudgetExceededError as exc:
+        logger.warning("RCA budget exceeded: %s", exc.to_response())
+        return {"success": False, "error": exc.to_response()}
     except Exception as exc:
         logger.error("RCA execution failed: %s", exc)
         return {"success": False, "error": str(exc)}

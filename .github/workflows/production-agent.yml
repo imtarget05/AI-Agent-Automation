@@ -90,6 +90,10 @@ jobs:
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
           API_SECRET_KEY=${{ secrets.PROD_API_SECRET_KEY }}
+          INTERNAL_SERVICE_TOKEN=${{ secrets.PROD_INTERNAL_SERVICE_TOKEN }}
+          QDRANT_API_KEY=${{ secrets.PROD_QDRANT_API_KEY }}
+          POSTGRES_PASSWORD=${{ secrets.PROD_POSTGRES_PASSWORD }}
+          REDIS_PASSWORD=${{ secrets.PROD_REDIS_PASSWORD }}
           DATABASE_URL=${{ secrets.PROD_DATABASE_URL }}
           REDIS_URL=${{ secrets.PROD_REDIS_URL }}
           QDRANT_URL=${{ secrets.PROD_QDRANT_URL }}
@@ -120,7 +124,6 @@ jobs:
           services:
             gateway:
               image: ${REGISTRY}/${PREFIX}-gateway:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
               deploy:
                 replicas: 2
@@ -129,54 +132,42 @@ jobs:
                   reservations: { cpus: "0.5", memory: 256M }
             aiops_agent:
               image: ${REGISTRY}/${PREFIX}-aiops_agent:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
               deploy:
                 resources:
                   limits: { cpus: "1.0", memory: 512M }
             rca_agent:
               image: ${REGISTRY}/${PREFIX}-rca_agent:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             devops_agent:
               image: ${REGISTRY}/${PREFIX}-devops_agent:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             report_agent:
               image: ${REGISTRY}/${PREFIX}-report_agent:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             email_agent:
               image: ${REGISTRY}/${PREFIX}-email_agent:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             guardrail_service:
               image: ${REGISTRY}/${PREFIX}-guardrail_service:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             approval_service:
               image: ${REGISTRY}/${PREFIX}-approval_service:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             rag_service:
               image: ${REGISTRY}/${PREFIX}-rag_service:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             eval_service:
               image: ${REGISTRY}/${PREFIX}-eval_service:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             tool_service:
               image: ${REGISTRY}/${PREFIX}-tool_service:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             monitoring:
               image: ${REGISTRY}/${PREFIX}-monitoring:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
             dashboard:
               image: ${REGISTRY}/${PREFIX}-dashboard:${IMAGE_TAG}
-              env_file: .env.production
               restart: always
           EOF
 
@@ -202,16 +193,19 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             # Snapshot current state for rollback
-            docker compose -f docker-compose.yml -f docker-compose.production.yml \
+            docker compose --env-file .env.production \
+              -f docker-compose.yml -f docker-compose.production.yml \
               ps --format json > /tmp/pre-deploy-state.json || true
 
             # Pull new images
             echo "🔽 Pulling images..."
-            docker compose -f docker-compose.yml -f docker-compose.production.yml pull
+            docker compose --env-file .env.production \
+              -f docker-compose.yml -f docker-compose.production.yml pull
 
             # Deploy with graceful rolling restart
             echo "🚀 Starting rolling deployment..."
-            docker compose -f docker-compose.yml -f docker-compose.production.yml up -d \
+            docker compose --env-file .env.production \
+              -f docker-compose.yml -f docker-compose.production.yml up -d \
               --remove-orphans \
               --wait \
               --wait-timeout 300
@@ -322,12 +316,14 @@ jobs:
             echo "Rollback tag: ${{ steps.rollback-tag.outputs.tag }}"
 
             # Restore previous compose state
-            docker compose -f docker-compose.yml -f docker-compose.production.yml \
+            docker compose --env-file .env.production \
+              -f docker-compose.yml -f docker-compose.production.yml \
               down --remove-orphans || true
 
             # Redeploy with previous images (tagged as 'stable-*')
             # In real setup, update compose to use previous image tags
-            docker compose -f docker-compose.yml -f docker-compose.production.yml \
+            docker compose --env-file .env.production \
+              -f docker-compose.yml -f docker-compose.production.yml \
               up -d --wait
 
             echo "✅ Rollback complete"

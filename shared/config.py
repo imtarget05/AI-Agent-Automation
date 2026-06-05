@@ -5,7 +5,7 @@ Shared configuration loader - tất cả config tập trung ở đây
 from pydantic_settings import BaseSettings
 from pydantic import Field, model_validator
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, Any
 import os
 
 
@@ -14,6 +14,10 @@ PLACEHOLDER_SECRETS = frozenset(
         "change-me",
         "change-me-in-production",
         "dev-secret-key-change-in-prod",
+        "dev-internal-service-token-change-in-prod",
+        "dev-qdrant-key-change-in-prod",
+        "dev-postgres-password-change-in-prod",
+        "dev-redis-password-change-in-prod",
         "replace-me",
         "sk-...",
         "sk-ant-...",
@@ -46,6 +50,28 @@ def _is_localhost(url: str) -> bool:
 class Settings(BaseSettings):
     """Central configuration"""
 
+    def __init__(self, **values: Any) -> None:
+        # Keep explicit _env_file=None constructors isolated from SDKs that may
+        # eagerly copy local .env values into os.environ during the same process.
+        if (
+            values.get("_env_file") is None
+            and str(values.get("env", "")).lower() == "production"
+        ):
+            values.setdefault("sandbox_demo_mode", False)
+            for field_name, default_value in {
+                "fb_page_token": "",
+                "fb_verify_token": "my_webhook_secret",
+                "fb_app_secret": "",
+                "zalo_oa_token": "",
+                "zalo_server_key": "",
+                "telegram_bot_token": "",
+                "telegram_webhook_secret": "",
+                "slack_bot_token": "",
+                "slack_signing_secret": "",
+            }.items():
+                values.setdefault(field_name, default_value)
+        super().__init__(**values)
+
     # ──── Environment ────
     env: str = Field(
         default="development", description="development|staging|production"
@@ -53,11 +79,20 @@ class Settings(BaseSettings):
     app_name: str = "Personal-AI-Agent"
     app_version: str = "0.1.0"
     debug: bool = Field(default=True)
+    sandbox_demo_mode: bool = Field(
+        default=False,
+        description="Return clearly labeled mock LLM responses in local demos only",
+    )
 
     # ──── LLM Configuration ────
     openai_api_key: str = Field(default="", description="OpenAI API key")
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
+    gemini_api_key: str = Field(default="", description="Gemini API key")
+    openrouter_api_key: str = Field(default="", description="OpenRouter API key")
     default_model: str = Field(default="gpt-4o", description="Default LLM model")
+    reasoning_model: str = Field(
+        default="", description="Reasoning model for complex tasks"
+    )
     fallback_model: str = Field(
         default="claude-sonnet-4-5", description="Fallback model"
     )
@@ -78,7 +113,7 @@ class Settings(BaseSettings):
         default="nomic-embed-text", description="Ollama embedding model name"
     )
     ollama_task_types: list[str] = Field(
-        default=["classification", "summarize", "parsing"],
+        default=["classification", "summarize", "parsing", "draft", "report_draft"],
         description="Tasks routed to Ollama when enabled",
     )
 
@@ -97,6 +132,7 @@ class Settings(BaseSettings):
     qdrant_url: str = Field(
         default="http://localhost:6333", description="Qdrant vector DB"
     )
+    qdrant_api_key: str = Field(default="", description="Qdrant API key")
 
     # ──── Social Platforms ────
     fb_page_token: str = Field(default="", description="Facebook Page Access Token")
@@ -121,6 +157,10 @@ class Settings(BaseSettings):
     # ──── Security ────
     api_secret_key: str = Field(
         default="change-me-in-production", description="Secret key for JWT"
+    )
+    internal_service_token: str = Field(
+        default="change-me-in-production",
+        description="Shared token for service-to-service HTTP authentication",
     )
     cors_origins: list[str] = Field(
         default=["*"],
@@ -189,6 +229,9 @@ class Settings(BaseSettings):
     devops_agent_service_url: str = Field(
         default="http://devops_agent:8015", description="DevOps agent service URL"
     )
+    agentscope_agent_service_url: str = Field(
+        default="http://agentscope_agent:8017", description="AgentScope agent service URL"
+    )
     agent_http_timeout_seconds: int = Field(
         default=60, description="Timeout for agent HTTP requests"
     )
@@ -215,6 +258,99 @@ class Settings(BaseSettings):
     accuracy_guardrail_enabled: bool = Field(
         default=True, description="Enable final synthesis accuracy check"
     )
+    orchestrator_max_iterations: int = Field(
+        default=8, ge=1, description="Maximum supervisor decisions per request"
+    )
+
+    # ──── MCP Configuration ────
+    mcp_enabled: bool = Field(
+        default=True, description="Enable optional MCP server integrations"
+    )
+    mcp_servers: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Opt-in STDIO MCP servers registered on Gateway startup",
+    )
+
+    # ---- Optional Open-source Runtime Adapters ----
+    agentscope_enabled: bool = Field(
+        default=False,
+        description="Enable the optional AgentScope 2.0 remote agent",
+    )
+    claw_enabled: bool = Field(
+        default=False,
+        description="Enable the optional claw-code CLI adapter",
+    )
+    claw_binary_path: Optional[str] = Field(
+        default=None,
+        description="Explicit path to the claw binary; defaults to local build or PATH",
+    )
+    claw_working_directory: Optional[str] = Field(
+        default=None,
+        description="Working directory used by claw-code CLI tasks",
+    )
+    claw_timeout_seconds: int = Field(
+        default=300,
+        ge=1,
+        description="Maximum runtime for one claw-code CLI invocation",
+    )
+
+    # ──── Open-source Knowledge Seeding ────
+    open_source_seed_enabled: bool = Field(
+        default=True,
+        description="Seed curated local open-source docs into vector memory",
+    )
+    open_source_seed_background: bool = Field(
+        default=True,
+        description="Run open-source seeding in the background during startup",
+    )
+    open_source_seed_force: bool = Field(
+        default=False,
+        description="Force re-embedding even when local docs are unchanged",
+    )
+
+    # ──── OpenTelemetry ────
+    otel_enabled: bool = Field(
+        default=False,
+        description="Enable OpenTelemetry distributed tracing",
+    )
+    otel_service_name: str = Field(
+        default="ai-agent-automation",
+        description="Service name injected into every span",
+    )
+    otel_exporter_otlp_endpoint: str = Field(
+        default="http://localhost:4317",
+        description="OTLP gRPC/HTTP endpoint for span export",
+    )
+    otel_traces_exporter: str = Field(
+        default="otlp",
+        description="Span exporter: otlp | jaeger | console",
+    )
+    otel_log_level: str = Field(
+        default="INFO",
+        description="Log level used by the OTel SDK",
+    )
+
+    # ──── Token Budget ────
+    max_tokens_per_request: int = Field(
+        default=20000,
+        description="Hard token limit per single LLM request",
+    )
+    max_tokens_per_workflow: int = Field(
+        default=80000,
+        description="Cumulative token limit per workflow run",
+    )
+    max_llm_calls_per_workflow: int = Field(
+        default=20,
+        description="Maximum number of LLM calls in a single workflow",
+    )
+    max_cost_per_workflow_usd: float = Field(
+        default=2.00,
+        description="Maximum estimated USD cost per workflow",
+    )
+    max_cost_per_user_daily_usd: float = Field(
+        default=10.00,
+        description="Maximum estimated USD cost per user per day",
+    )
 
     # ──── Feature Flags ────
     enable_browser_agent: bool = True
@@ -231,12 +367,48 @@ class Settings(BaseSettings):
             raise ValueError(
                 "API_SECRET_KEY must be set to a non-placeholder value in production"
             )
+        if _is_placeholder_secret(self.internal_service_token):
+            raise ValueError(
+                "INTERNAL_SERVICE_TOKEN must be set to a non-placeholder value "
+                "in production"
+            )
+        if _is_placeholder_secret(self.qdrant_api_key):
+            raise ValueError(
+                "QDRANT_API_KEY must be set to a non-placeholder value in production"
+            )
+        if "*" in self.cors_origins:
+            raise ValueError("CORS_ORIGINS cannot contain '*' in production")
+        if self.sandbox_demo_mode:
+            raise ValueError("SANDBOX_DEMO_MODE cannot be enabled in production")
 
         slack_configured = bool(self.slack_bot_token or self.slack_signing_secret)
         if slack_configured and _is_placeholder_secret(self.slack_signing_secret):
             raise ValueError(
                 "SLACK_SIGNING_SECRET must be set to a non-placeholder value "
                 "when Slack is configured in production"
+            )
+        if self.fb_page_token:
+            if _is_placeholder_secret(self.fb_verify_token):
+                raise ValueError(
+                    "FB_VERIFY_TOKEN must be set to a non-placeholder value "
+                    "when Facebook is configured in production"
+                )
+            if _is_placeholder_secret(self.fb_app_secret):
+                raise ValueError(
+                    "FB_APP_SECRET must be set to a non-placeholder value "
+                    "when Facebook is configured in production"
+                )
+        if self.zalo_oa_token and _is_placeholder_secret(self.zalo_server_key):
+            raise ValueError(
+                "ZALO_SERVER_KEY must be set to a non-placeholder value "
+                "when Zalo is configured in production"
+            )
+        if self.telegram_bot_token and _is_placeholder_secret(
+            self.telegram_webhook_secret
+        ):
+            raise ValueError(
+                "TELEGRAM_WEBHOOK_SECRET must be set to a non-placeholder value "
+                "when Telegram is configured in production"
             )
 
         has_cloud_llm = any(

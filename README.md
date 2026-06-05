@@ -16,7 +16,13 @@ Most AI agent portfolios show "chat with PDF". This platform solves a real produ
 | Capability | Why it matters |
 |---|---|
 | **Guardrail + Approval Flow** | Agents don't act blindly — dangerous ops (kubectl delete, etc.) require human approval |
+| **Resilience & Circuit Breaker** | LLM router with exponential backoff and auto-fallback (GPT-4o → Claude → Ollama) |
+| **Search Fallback** | Browser agent with intelligent DDG fallback and LLM-assisted HTML parsing |
+| **Optional MCP Tools** | Lazy STDIO MCP integrations with guardrail and approval checks |
+| **Curated Open-source Knowledge** | Index selected cloned README files into vector memory without importing foreign runtimes |
+| **Optional AgentScope + Claw** | Explicit opt-in adapters; unavailable runtimes fail closed instead of returning mock success |
 | **Corrective RAG** | Query expansion → vector retrieval → LLM relevance grading → hallucination check |
+| **Security First** | Automated PII masking, production secret validation, and dependency auditing |
 | **Reflexion-style RCA** | Root cause agent reasons in a loop (up to N steps) with real tool observations |
 | **Evaluation Service** | Faithfulness score, relevance score, trajectory correctness — you can *measure* the agent |
 | **Async Job Persistence** | Long-running tasks stored in Redis; clients poll `GET /tasks/{job_id}` |

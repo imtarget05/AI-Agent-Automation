@@ -16,6 +16,7 @@ from tools.github import GitHubTool
 from tools.slack import SlackTool
 from shared.approvals import ApprovalClient, ApprovalServiceError
 from shared.guardrails import GuardrailClient, GuardrailServiceError
+from shared.internal_auth import add_internal_auth_middleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tool_service")
@@ -25,6 +26,7 @@ app = FastAPI(
     description="REST API service hosting platform execution tools for agents",
     version="1.0.0",
 )
+add_internal_auth_middleware(app)
 
 # Initialize tool clients
 k8s_tool = K8sTool()
@@ -180,6 +182,7 @@ async def execute_k8s_write_action(request: K8sWriteActionRequest):
                 status_code=403,
                 detail=verdict.get("reason", "Kubernetes action blocked by guardrail"),
             )
+        await approval_client.claim_execution(request.approval_id)
 
         namespace = request.parameters.get("namespace", "default")
         if request.action == "restart_deployment":

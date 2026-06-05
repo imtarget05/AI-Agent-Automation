@@ -11,6 +11,7 @@ from datetime import datetime
 import httpx
 
 from .metrics import MetricData, MetricType, AgentType, TaskStatus
+from .internal_auth import get_internal_service_headers
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class MetricsCollector:
             response = await self.client.post(
                 f"{self.monitoring_url}/metrics/collect",
                 json=metric.model_dump(mode="json"),
+                headers=get_internal_service_headers(),
             )
             return response.status_code == 200
         except Exception as e:
@@ -161,6 +163,7 @@ class MetricsCollector:
             response = await self.client.post(
                 f"{self.monitoring_url}/metrics/batch",
                 json=[m.model_dump(mode="json") for m in metrics],
+                headers=get_internal_service_headers(),
             )
             return response.status_code == 200
         except Exception as e:

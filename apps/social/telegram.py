@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, status
@@ -38,8 +39,9 @@ class TelegramMessage(BaseModel):
 def verify_telegram_signature(secret_token: str) -> bool:
     """Verify Telegram webhook secret token when configured."""
     if not settings.telegram_webhook_secret:
-        return True
-    return secret_token == settings.telegram_webhook_secret
+        logger.warning("TELEGRAM_WEBHOOK_SECRET is not configured")
+        return False
+    return secrets.compare_digest(secret_token, settings.telegram_webhook_secret)
 
 
 @app.post("/webhook")
@@ -52,7 +54,11 @@ async def receive_telegram_update(request: Request):
 
     body = await request.body()
     data = json.loads(body)
-    logger.info("Received Telegram update: %s", json.dumps(data, indent=2))
+    logger.info(
+        "Received Telegram update %s with fields: %s",
+        data.get("update_id", "unknown"),
+        sorted(data),
+    )
 
     message = data.get("message") or data.get("edited_message")
     if not message:
@@ -103,9 +109,12 @@ async def send_telegram_message(chat_id: int, text: str):
     }
 
     async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(url, json=payload)
-        response.raise_for_status()
-        logger.info("Telegram message sent to chat %s", chat_id)
+        try:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            raise RuntimeError("Telegram API request failed") from None
+        logger.info("Telegram message sent")
 
 
 @app.get("/health")

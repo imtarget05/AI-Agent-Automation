@@ -24,7 +24,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-dev-placeholder}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-ant-dev-placeholder}
       DATABASE_URL: "sqlite+aiosqlite:///./data/dev.db"
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD:-dev-redis-password-change-in-prod}@redis:6379
       QDRANT_URL: http://qdrant:6333
       GUARDRAIL_SERVICE_URL: http://guardrail_service:8010
       APPROVAL_SERVICE_URL: http://approval_service:8011

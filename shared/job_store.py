@@ -65,6 +65,7 @@ class JobStore:
 
     def __init__(self, redis_url: Optional[str] = None):
         self._redis_url = redis_url or settings.redis_url
+        self._local_jobs: dict[str, JobRecord] = {}
 
     async def _get_redis(self) -> aioredis.Redis:
         return await aioredis.from_url(self._redis_url, decode_responses=True)
@@ -135,36 +136,49 @@ class JobStore:
 
     async def get(self, job_id: str) -> Optional[JobRecord]:
         """Retrieve a job record by ID. Returns None if not found."""
-        redis = await self._get_redis()
         try:
-            raw = await redis.get(self._key(job_id))
+            redis = await self._get_redis()
+            try:
+                raw = await redis.get(self._key(job_id))
+            finally:
+                await redis.aclose()
             if not raw:
-                return None
+                record = self._local_jobs.get(job_id)
+                return record.model_copy(deep=True) if record else None
             return JobRecord.from_redis(raw)
-        finally:
-            await redis.aclose()
+        except Exception as exc:  # pragma: no cover - runtime resilience
+            logger.warning("[JobStore] Redis read failed, using memory fallback: %s", exc)
+            record = self._local_jobs.get(job_id)
+            return record.model_copy(deep=True) if record else None
 
     async def exists(self, job_id: str) -> bool:
-        redis = await self._get_redis()
         try:
-            return bool(await redis.exists(self._key(job_id)))
-        finally:
-            await redis.aclose()
+            redis = await self._get_redis()
+            try:
+                return bool(await redis.exists(self._key(job_id)))
+            finally:
+                await redis.aclose()
+        except Exception:  # pragma: no cover - runtime resilience
+            return job_id in self._local_jobs
 
     # ──────────────────────────────────────────────
     # Internal
     # ──────────────────────────────────────────────
 
     async def _save(self, record: JobRecord) -> None:
-        redis = await self._get_redis()
+        self._local_jobs[record.job_id] = record.model_copy(deep=True)
         try:
-            await redis.setex(
-                self._key(record.job_id),
-                JOB_TTL_SECONDS,
-                record.to_redis(),
-            )
-        finally:
-            await redis.aclose()
+            redis = await self._get_redis()
+            try:
+                await redis.setex(
+                    self._key(record.job_id),
+                    JOB_TTL_SECONDS,
+                    record.to_redis(),
+                )
+            finally:
+                await redis.aclose()
+        except Exception as exc:  # pragma: no cover - runtime resilience
+            logger.warning("[JobStore] Redis write failed, using memory fallback: %s", exc)
 
 
 # Process-wide singleton

@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 DEFAULT_EXTENSIONS = [".md", ".pdf", ".tex", ".txt"]
+MAX_INGEST_FILES = 200
+MAX_INGEST_FILE_BYTES = 5 * 1024 * 1024
+MAX_INGEST_CHUNKS = 1000
 
 
 def _strip_markdown_front_matter(text: str) -> str:
@@ -95,6 +98,9 @@ def build_chunks(
     """Build chunk records from files"""
     chunks = []
     for file_path in files:
+        if file_path.stat().st_size > MAX_INGEST_FILE_BYTES:
+            logger.warning("Skipping oversized RAG source: %s", file_path)
+            continue
         text = read_file_text(file_path)
         if not text.strip():
             continue
@@ -118,17 +124,17 @@ async def ingest_path(
     namespace: str = "docs",
 ) -> dict:
     """Ingest files into Qdrant and return stats"""
-    chunk_size = chunk_size or settings.rag_chunk_size
-    overlap = overlap or settings.rag_chunk_overlap
+    chunk_size = settings.rag_chunk_size if chunk_size is None else chunk_size
+    overlap = settings.rag_chunk_overlap if overlap is None else overlap
 
-    files = list(iter_files(base_path, extensions))
+    files = list(iter_files(base_path, extensions))[:MAX_INGEST_FILES]
 
     if include_readme:
         readme = base_path.parent / "README.md"
         if readme.exists():
             files.append(readme)
 
-    chunks = build_chunks(files, chunk_size, overlap)
+    chunks = build_chunks(files, chunk_size, overlap)[:MAX_INGEST_CHUNKS]
     if not chunks:
         return {"files": 0, "chunks": 0}
 

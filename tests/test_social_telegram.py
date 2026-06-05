@@ -4,10 +4,17 @@ from apps.social.telegram import app
 import apps.social.telegram as telegram_module
 
 client = TestClient(app)
+WEBHOOK_SECRET = "test-telegram-webhook-secret"
+WEBHOOK_HEADERS = {"X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET}
 
 
 def test_telegram_webhook_replies_to_text(monkeypatch):
     sent_messages = []
+    monkeypatch.setattr(
+        telegram_module.settings,
+        "telegram_webhook_secret",
+        WEBHOOK_SECRET,
+    )
 
     async def fake_generate_reply(user_message: str, user_id: str) -> str:
         assert user_message == "Xin chao"
@@ -24,6 +31,7 @@ def test_telegram_webhook_replies_to_text(monkeypatch):
 
     response = client.post(
         "/webhook",
+        headers=WEBHOOK_HEADERS,
         json={
             "message": {
                 "message_id": 1,
@@ -40,6 +48,12 @@ def test_telegram_webhook_replies_to_text(monkeypatch):
 
 
 def test_telegram_webhook_ignores_non_text_updates(monkeypatch):
+    monkeypatch.setattr(
+        telegram_module.settings,
+        "telegram_webhook_secret",
+        WEBHOOK_SECRET,
+    )
+
     async def fake_send_telegram_message(chat_id: int, text: str):
         raise AssertionError("send_telegram_message should not be called")
 
@@ -49,6 +63,7 @@ def test_telegram_webhook_ignores_non_text_updates(monkeypatch):
 
     response = client.post(
         "/webhook",
+        headers=WEBHOOK_HEADERS,
         json={
             "message": {
                 "message_id": 1,
@@ -60,3 +75,15 @@ def test_telegram_webhook_ignores_non_text_updates(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["handled"] is False
+
+
+def test_telegram_webhook_rejects_missing_secret(monkeypatch):
+    monkeypatch.setattr(
+        telegram_module.settings,
+        "telegram_webhook_secret",
+        WEBHOOK_SECRET,
+    )
+
+    response = client.post("/webhook", json={"update_id": 1})
+
+    assert response.status_code == 403

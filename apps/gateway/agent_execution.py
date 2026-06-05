@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+import asyncio
 import re
 import time
 from dataclasses import dataclass
@@ -11,11 +11,16 @@ from typing import Any, Callable, Optional, Protocol
 import httpx
 
 from shared.approvals import ApprovalClient
+from shared.claw import ClawWrapper
 from shared.config import Settings
 from shared.guardrails import GuardrailClient
+from shared.internal_auth import get_internal_service_headers
+from shared.mcp import get_mcp_manager
 from shared.models import ModuleType, Task, TaskResult, TaskStatus
+from shared.observability.logging import get_logger
+from shared.observability.tracing import record_error, start_span
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LlmClient(Protocol):
@@ -80,7 +85,11 @@ class HttpAgentGateway:
     ) -> dict[str, Any]:
         url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, json=payload)
+            response = await client.post(
+                url,
+                json=payload,
+                headers=get_internal_service_headers(),
+            )
             response.raise_for_status()
             data = response.json()
 
@@ -96,7 +105,8 @@ class AgentSpec:
     settings_attr: str
     path: str = "/execute"
     payload_builder: Callable[[Task], dict[str, Any]] = lambda task: {
-        "instruction": task.instruction
+        "instruction": task.instruction,
+        "context": task.context,
     }
 
     def build_payload(self, task: Task) -> dict[str, Any]:
@@ -119,9 +129,14 @@ REMOTE_AGENT_SPECS: dict[ModuleType, AgentSpec] = {
     ),
     ModuleType.EMAIL: AgentSpec(
         "email_agent_service_url",
-        payload_builder=lambda task: _build_email_payload(task),
+        payload_builder=lambda task: _with_context(
+            _build_email_payload(task), task, key="context_data"
+        ),
     ),
-    ModuleType.TOOL: AgentSpec("tool_service_url"),
+    ModuleType.TOOL: AgentSpec(
+        "tool_service_url",
+        payload_builder=lambda task: {"instruction": task.instruction},
+    ),
     ModuleType.GUARDRAIL: AgentSpec(
         "guardrail_service_url",
         path="/guard/tool",
@@ -131,10 +146,36 @@ REMOTE_AGENT_SPECS: dict[ModuleType, AgentSpec] = {
             "parameters": {},
         },
     ),
-    ModuleType.AIOPS: AgentSpec("aiops_agent_service_url"),
-    ModuleType.RCA: AgentSpec("rca_agent_service_url"),
-    ModuleType.DEVOPS: AgentSpec("devops_agent_service_url"),
-    ModuleType.REPORT: AgentSpec("report_agent_service_url"),
+    ModuleType.AIOPS: AgentSpec(
+        "aiops_agent_service_url",
+        payload_builder=lambda task: _with_context(
+            {"instruction": task.instruction}, task
+        ),
+    ),
+    ModuleType.RCA: AgentSpec(
+        "rca_agent_service_url",
+        payload_builder=lambda task: _with_context(
+            {"instruction": task.instruction}, task
+        ),
+    ),
+    ModuleType.DEVOPS: AgentSpec(
+        "devops_agent_service_url",
+        payload_builder=lambda task: _with_context(
+            {"instruction": task.instruction}, task
+        ),
+    ),
+    ModuleType.REPORT: AgentSpec(
+        "report_agent_service_url",
+        payload_builder=lambda task: _with_context(
+            {"instruction": task.instruction}, task
+        ),
+    ),
+    ModuleType.AGENTSCOPE: AgentSpec(
+        "agentscope_agent_service_url",
+        payload_builder=lambda task: _with_context(
+            {"instruction": task.instruction}, task
+        ),
+    ),
 }
 
 CRITICAL_ACTION_AGENTS = frozenset(
@@ -168,77 +209,250 @@ class AgentExecutionService:
     async def execute(self, task: Task, approved: bool = False) -> TaskResult:
         """Run a task after safety checks and return a stable domain result."""
         started_at = time.perf_counter()
-        payload = REMOTE_AGENT_SPECS[task.agent].build_payload(task)
+        workflow_id = str(task.context.get("workflow_id", ""))
+        session_id = str(task.context.get("session_id", ""))
 
-        risk_reason = await self._find_input_risk(task.instruction)
-        if risk_reason:
-            logger.warning(
-                "[GUARDRAIL BLOCK] Input blocked for task %s: %s",
-                task.id,
-                risk_reason,
+        with start_span(
+            "agent.execute",
+            {
+                "workflow_id": workflow_id,
+                "session_id": session_id,
+                "agent_name": task.agent.value,
+                "task_id": task.id,
+            },
+        ) as span:
+            risk_reason = await self._find_input_risk(
+                task.instruction,
+                workflow_id=workflow_id,
+                session_id=session_id,
             )
+            if risk_reason:
+                span.set_attribute("status", "guardrail_blocked")
+                logger.warning(
+                    "[GUARDRAIL BLOCK] Input blocked for task %s: %s",
+                    task.id,
+                    risk_reason,
+                )
+                return self._result(
+                    task,
+                    TaskStatus.FAILED,
+                    started_at,
+                    error_message=f"Input safety block: {risk_reason}",
+                )
+
+            if task.agent == ModuleType.MCP:
+                return await self._execute_mcp(task, started_at, approved)
+
+            if task.agent == ModuleType.CLAW:
+                if not getattr(self.settings, "claw_enabled", False):
+                    span.set_attribute("status", "disabled")
+                    return self._result(
+                        task,
+                        TaskStatus.FAILED,
+                        started_at,
+                        error_message="Claw integration is disabled",
+                    )
+                payload = {"instruction": task.instruction}
+                blocked_result = await self._check_critical_action(
+                    task=task,
+                    payload=payload,
+                    started_at=started_at,
+                    approved=approved,
+                    tool_name="claw",
+                    action="prompt",
+                )
+                if blocked_result:
+                    span.set_attribute("status", "approval_required")
+                    return blocked_result
+                return await self._execute_claw(task, started_at)
+
+            if task.agent == ModuleType.AGENTSCOPE and not getattr(
+                self.settings,
+                "agentscope_enabled",
+                False,
+            ):
+                span.set_attribute("status", "disabled")
+                return self._result(
+                    task,
+                    TaskStatus.FAILED,
+                    started_at,
+                    error_message="AgentScope integration is disabled",
+                )
+
+            payload = REMOTE_AGENT_SPECS[task.agent].build_payload(task)
+
+            if task.agent in CRITICAL_ACTION_AGENTS:
+                blocked_result = await self._check_critical_action(
+                    task=task,
+                    payload=payload,
+                    started_at=started_at,
+                    approved=approved,
+                )
+                if blocked_result:
+                    span.set_attribute("status", "approval_required")
+                    return blocked_result
+
+            spec = REMOTE_AGENT_SPECS[task.agent]
+            base_url = getattr(self.settings, spec.settings_attr)
+            try:
+                with start_span(
+                    "agent.remote_call",
+                    {
+                        "workflow_id": workflow_id,
+                        "session_id": session_id,
+                        "agent_name": task.agent.value,
+                    },
+                ) as call_span:
+                    response = await self.agents.post_json(
+                        base_url=base_url,
+                        path=spec.path,
+                        payload=payload,
+                        timeout=task.timeout_seconds
+                        or self.settings.agent_http_timeout_seconds,
+                    )
+                    call_span.set_attribute("status", "success")
+                await self._reflect_on_failure(task, response)
+                status = (
+                    TaskStatus.COMPLETED
+                    if response.get("success", True)
+                    else TaskStatus.FAILED
+                )
+                span.set_attribute("status", status.value)
+                return self._result(
+                    task,
+                    status,
+                    started_at,
+                    output=response,
+                    error_message=response.get("error"),
+                )
+            except Exception as exc:
+                record_error(span, exc)
+                logger.error(
+                    "[%s] Task %s failed: %s", task.agent.value.upper(), task.id, exc
+                )
+                return self._result(
+                    task,
+                    TaskStatus.FAILED,
+                    started_at,
+                    error_message=str(exc),
+                )
+
+    async def _execute_claw(self, task: Task, started_at: float) -> TaskResult:
+        """Execute a task using the Claw-Code CLI wrapper."""
+        try:
+            claw = ClawWrapper(settings=self.settings)
+            result = await asyncio.to_thread(claw.prompt, task.instruction)
+            return self._result(
+                task,
+                TaskStatus.COMPLETED,
+                started_at,
+                output={"success": True, "result": result},
+            )
+        except Exception as exc:
+            logger.error("[CLAW] Execution failed: %s", exc)
             return self._result(
                 task,
                 TaskStatus.FAILED,
                 started_at,
-                error_message=f"Input safety block: {risk_reason}",
+                error_message=f"Claw Error: {exc}",
             )
 
-        if task.agent in CRITICAL_ACTION_AGENTS:
+    async def _execute_mcp(
+        self, task: Task, started_at: float, approved: bool
+    ) -> TaskResult:
+        """Execute a task using the Model Context Protocol (MCP)."""
+        manager = get_mcp_manager()
+
+        # Extract MCP specifics from context or instruction
+        server = task.context.get("server")
+        tool = task.context.get("tool")
+        arguments = task.context.get("arguments", {})
+        if not isinstance(arguments, dict):
+            return self._result(
+                task,
+                TaskStatus.FAILED,
+                started_at,
+                error_message="MCP task arguments must be an object",
+            )
+
+        if not server or not tool:
+            # Try to parse from instruction if not in context
+            logger.info("[MCP] Attempting to parse server/tool from instruction")
+            # Simple heuristic: "call server:tool with args"
+            match = re.search(
+                r"call\s+([\w-]+):([\w-]+)", task.instruction, re.IGNORECASE
+            )
+            if match:
+                server, tool = match.groups()
+            else:
+                return self._result(
+                    task,
+                    TaskStatus.FAILED,
+                    started_at,
+                    error_message=(
+                        "MCP task requires 'server' and 'tool' in context or "
+                        "'call server:tool' in instruction"
+                    ),
+                )
+
+        try:
+            payload = {"server": server, "tool": tool, "arguments": arguments}
             blocked_result = await self._check_critical_action(
                 task=task,
                 payload=payload,
                 started_at=started_at,
                 approved=approved,
+                tool_name=f"mcp:{server}",
+                action=tool,
             )
             if blocked_result:
                 return blocked_result
 
-        spec = REMOTE_AGENT_SPECS[task.agent]
-        base_url = getattr(self.settings, spec.settings_attr)
-        try:
-            response = await self.agents.post_json(
-                base_url=base_url,
-                path=spec.path,
-                payload=payload,
-                timeout=task.timeout_seconds
-                or self.settings.agent_http_timeout_seconds,
-            )
-            await self._reflect_on_failure(task, response)
-            status = (
-                TaskStatus.COMPLETED
-                if response.get("success", True)
-                else TaskStatus.FAILED
-            )
+            logger.info("[MCP] Calling %s:%s", server, tool)
+            result = await manager.call_tool(server, tool, arguments)
             return self._result(
                 task,
-                status,
+                TaskStatus.COMPLETED,
                 started_at,
-                output=response,
-                error_message=response.get("error"),
+                output={"success": True, "result": _serialize_mcp_result(result)},
             )
         except Exception as exc:
-            logger.error(
-                "[%s] Task %s failed: %s", task.agent.value.upper(), task.id, exc
-            )
+            logger.error("[MCP] Call failed: %s", exc)
             return self._result(
                 task,
                 TaskStatus.FAILED,
                 started_at,
-                error_message=str(exc),
+                error_message=f"MCP Error: {exc}",
             )
 
-    async def _find_input_risk(self, instruction: str) -> Optional[str]:
-        try:
-            verdict = await self.guardrails.guard_input(instruction)
-            if not verdict.get("safe", True):
-                return verdict.get("reason", "Malicious input pattern detected.")
-            return None
-        except Exception as exc:
-            logger.warning(
-                "Could not reach guardrail service: %s. Running local pattern scanner fallback.",
-                exc,
-            )
+    async def _find_input_risk(
+        self,
+        instruction: str,
+        workflow_id: str = "",
+        session_id: str = "",
+    ) -> Optional[str]:
+        with start_span(
+            "guardrail.agent_input_check",
+            {
+                "workflow_id": workflow_id,
+                "session_id": session_id,
+                "agent_name": "guardrail",
+            },
+        ) as span:
+            try:
+                verdict = await self.guardrails.guard_input(instruction)
+                span.set_attribute(
+                    "status", "safe" if verdict.get("safe", True) else "blocked"
+                )
+                if not verdict.get("safe", True):
+                    return verdict.get("reason", "Malicious input pattern detected.")
+                return None
+            except Exception as exc:
+                record_error(span, exc)
+                logger.warning(
+                    "Could not reach guardrail service: %s. Running local pattern scanner fallback.",
+                    exc,
+                )
 
         for pattern in LOCAL_BLOCK_PATTERNS:
             if re.search(pattern, instruction, re.IGNORECASE):
@@ -251,52 +465,82 @@ class AgentExecutionService:
         payload: dict[str, Any],
         started_at: float,
         approved: bool,
+        tool_name: Optional[str] = None,
+        action: Optional[str] = None,
     ) -> Optional[TaskResult]:
-        try:
-            verdict = await self.guardrails.guard_tool(
-                tool_name=task.agent.value,
-                action=task.instruction,
-                parameters=payload,
-            )
-        except Exception as exc:
-            return self._result(
-                task,
-                TaskStatus.FAILED,
-                started_at,
-                error_message=f"Guardrail service unavailable: {exc}",
-            )
-
-        if verdict.get("verdict") == "BLOCK":
-            return self._result(
-                task,
-                TaskStatus.FAILED,
-                started_at,
-                output=verdict,
-                error_message=verdict.get(
-                    "reason",
-                    "Tool action blocked by guardrail",
-                ),
-            )
-
-        if verdict.get("requires_approval") and not approved:
+        workflow_id = str(task.context.get("workflow_id", ""))
+        session_id = str(task.context.get("session_id", ""))
+        resolved_tool = tool_name or task.agent.value
+        resolved_action = action or task.instruction
+        with start_span(
+            "guardrail.tool_check",
+            {
+                "workflow_id": workflow_id,
+                "session_id": session_id,
+                "agent_name": task.agent.value,
+                "tool_name": resolved_tool,
+                "action": resolved_action[:120],
+            },
+        ) as span:
             try:
-                approval = await self.approvals.create_approval(
-                    task_id=task.id,
-                    agent=task.agent.value,
-                    action=task.instruction,
+                verdict = await self.guardrails.guard_tool(
+                    tool_name=resolved_tool,
+                    action=resolved_action,
                     parameters=payload,
-                    reason=verdict.get("reason"),
                 )
+                span.set_attribute("status", verdict.get("verdict", "unknown"))
             except Exception as exc:
-                approval = {"error": f"Approval service unavailable: {exc}"}
+                record_error(span, exc)
+                return self._result(
+                    task,
+                    TaskStatus.FAILED,
+                    started_at,
+                    error_message=f"Guardrail service unavailable: {exc}",
+                )
 
-            return self._result(
-                task,
-                TaskStatus.FAILED,
-                started_at,
-                output={"status": "AWAITING_APPROVAL", "approval": approval},
-                error_message="Tool action requires operator approval.",
-            )
+            if verdict.get("verdict") == "BLOCK":
+                span.set_attribute("status", "blocked")
+                return self._result(
+                    task,
+                    TaskStatus.FAILED,
+                    started_at,
+                    output=verdict,
+                    error_message=verdict.get(
+                        "reason",
+                        "Tool action blocked by guardrail",
+                    ),
+                )
+
+            if verdict.get("requires_approval") and not approved:
+                with start_span(
+                    "approval.request",
+                    {
+                        "workflow_id": workflow_id,
+                        "session_id": session_id,
+                        "agent_name": task.agent.value,
+                        "tool_name": resolved_tool,
+                    },
+                ) as approval_span:
+                    try:
+                        approval = await self.approvals.create_approval(
+                            task_id=task.id,
+                            agent=task.agent.value,
+                            action=task.instruction,
+                            parameters=payload,
+                            reason=verdict.get("reason"),
+                        )
+                        approval_span.set_attribute("status", "requested")
+                    except Exception as exc:
+                        record_error(approval_span, exc)
+                        approval = {"error": f"Approval service unavailable: {exc}"}
+
+                return self._result(
+                    task,
+                    TaskStatus.FAILED,
+                    started_at,
+                    output={"status": "AWAITING_APPROVAL", "approval": approval},
+                    error_message="Tool action requires operator approval.",
+                )
 
         return None
 
@@ -365,6 +609,30 @@ def _build_email_payload(task: Task) -> dict[str, Any]:
         ),
         "mode": "draft",
     }
+
+
+def _with_context(
+    payload: dict[str, Any],
+    task: Task,
+    key: str = "context",
+) -> dict[str, Any]:
+    """Attach context only for service boundaries that accept it."""
+    if task.context:
+        payload[key] = task.context
+    return payload
+
+
+def _serialize_mcp_result(result: Any) -> Any:
+    """Convert MCP SDK response objects into JSON-safe values."""
+    if hasattr(result, "model_dump"):
+        return result.model_dump(mode="json")
+    if isinstance(result, dict):
+        return {key: _serialize_mcp_result(value) for key, value in result.items()}
+    if isinstance(result, (list, tuple)):
+        return [_serialize_mcp_result(value) for value in result]
+    if hasattr(result, "content"):
+        return _serialize_mcp_result(result.content)
+    return str(result)
 
 
 def _build_browser_payload(task: Task) -> dict[str, Any]:

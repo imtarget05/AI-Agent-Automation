@@ -1,0 +1,26 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "__name__": "container_cpu_usage_seconds_total",
+          "container": "payment-service",
+          "namespace": "production",
+          "pod": "payment-service-abc-123"
+        },
+        "value": [1717000000, "0.953"]
+      },
+      {
+        "metric": {
+          "__name__": "container_memory_working_set_bytes",
+          "container": "payment-service",
+          "namespace": "production",
+          "pod": "payment-service-abc-123"
+        },
+        "value": [1717000000, "824633720"]
+      }
+    ]
+  }
+}

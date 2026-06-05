@@ -1,4 +1,3 @@
-import logging
 from typing import Any, Dict, Optional
 
 import httpx
@@ -7,9 +6,14 @@ from pydantic import BaseModel, Field
 
 from shared.config import get_settings
 from shared.llm import get_llm_router
+from shared.internal_auth import add_internal_auth_middleware
+from shared.internal_auth import get_internal_service_headers
+from shared.observability.logging import get_logger
+from shared.observability.tracing import start_span
 
 app = FastAPI(title="AIOps Agent")
-logger = logging.getLogger(__name__)
+add_internal_auth_middleware(app)
+logger = get_logger(__name__)
 settings = get_settings()
 llm_router = get_llm_router()
 
@@ -21,45 +25,90 @@ class TaskRequest(BaseModel):
 
 @app.post("/execute")
 async def execute_task(req: TaskRequest):
-    """Collect basic infrastructure metrics and ask the LLM to identify anomalies."""
+    """Analyze metrics or logs and identify anomalies or summarize findings."""
     logger.info("AIOps Agent received task: %s", req.instruction)
+    context = req.context or {}
+    workflow_id = str(context.get("workflow_id", ""))
+    session_id = str(context.get("session_id", ""))
     tool_url = settings.tool_service_url.rstrip("/")
+    instruction_lower = req.instruction.lower()
+
+    # Determine task type for cost-optimized routing
+    task_type = "analysis"  # Default to hard reasoning
+    if any(kw in instruction_lower for kw in ("summarize", "summary", "log summary")):
+        task_type = "summarize"
+    elif any(kw in instruction_lower for kw in ("classify", "classification", "category")):
+        task_type = "classification"
+
     metrics_data: Dict[str, Any] = {}
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            cpu_res = await client.get(
-                f"{tool_url}/prometheus/query",
-                params={"query": "container_cpu_usage_seconds_total{pod=~'.*'}"},
-            )
-            if cpu_res.status_code == 200:
-                metrics_data["cpu"] = cpu_res.json()
+        # If it's a log-related task, try to fetch logs
+        if "log" in instruction_lower:
+            pod_name = context.get("pod_name") or context.get("pod")
+            if pod_name:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    headers = get_internal_service_headers()
+                    namespace = context.get("namespace", "default")
+                    log_res = await client.get(
+                        f"{tool_url}/k8s/logs",
+                        params={"pod_name": pod_name, "namespace": namespace, "tail_lines": 100},
+                        headers=headers,
+                    )
+                    if log_res.status_code == 200:
+                        metrics_data["logs"] = log_res.json().get("logs", "")
 
-            memory_res = await client.get(
-                f"{tool_url}/prometheus/query",
-                params={"query": "container_memory_working_set_bytes{pod=~'.*'}"},
-            )
-            if memory_res.status_code == 200:
-                metrics_data["memory"] = memory_res.json()
+        # Otherwise fetch standard metrics
+        if not metrics_data.get("logs") or "metric" in instruction_lower:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                headers = get_internal_service_headers()
+                cpu_res = await client.get(
+                    f"{tool_url}/prometheus/query",
+                    params={"query": "container_cpu_usage_seconds_total{pod=~'.*'}"},
+                    headers=headers,
+                )
+                if cpu_res.status_code == 200:
+                    metrics_data["cpu"] = cpu_res.json()
 
-        analysis_prompt = f"""You are an AIOps anomaly detector. Analyze these metrics and identify anomalies.
+                memory_res = await client.get(
+                    f"{tool_url}/prometheus/query",
+                    params={"query": "container_memory_working_set_bytes{pod=~'.*'}"},
+                    headers=headers,
+                )
+                if memory_res.status_code == 200:
+                    metrics_data["memory"] = memory_res.json()
+
+        analysis_prompt = f"""You are an AIOps specialist. Analyze the following data based on the instruction.
 Instruction: {req.instruction}
-Metrics Data: {metrics_data}
+Data: {metrics_data}
 
-Return a list of anomalies found. Format each as a string. If none, return an empty list.
+Provide a clear and concise response.
 """
-        analysis = await llm_router.chat(
-            [{"role": "user", "content": analysis_prompt}],
-            task="analysis",
-        )
-        anomalies = [line for line in analysis.splitlines() if line.strip()]
+        with start_span(
+            "aiops.execution",
+            {
+                "workflow_id": workflow_id,
+                "session_id": session_id,
+                "agent_name": "aiops_agent",
+                "task_type": task_type,
+            },
+        ):
+            analysis = await llm_router.chat(
+                [{"role": "user", "content": analysis_prompt}],
+                task=task_type,
+                workflow_id=workflow_id,
+                session_id=session_id,
+                agent_name="aiops_agent",
+                estimated_tokens=1500,
+            )
+        
         return {
             "success": True,
-            "message": "Metrics analysis completed.",
+            "message": f"AIOps {task_type} completed.",
             "data": {
-                "metrics": metrics_data,
+                "input_data": metrics_data,
                 "analysis": analysis,
-                "anomalies_detected": anomalies,
+                "task_type": task_type,
             },
         }
     except Exception as exc:

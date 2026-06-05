@@ -9,6 +9,7 @@ from fastapi import FastAPI, Body, HTTPException
 from contextlib import asynccontextmanager
 
 from services.eval_service.evaluator import AgentEvaluator
+from shared.internal_auth import add_internal_auth_middleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("eval_service")
@@ -27,6 +28,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+add_internal_auth_middleware(app)
 
 evaluator = AgentEvaluator()
 

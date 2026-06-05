@@ -12,6 +12,7 @@ class ApprovalStatus(str, Enum):
 
 class ExecutionStatus(str, Enum):
     PENDING = "pending"
+    RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 

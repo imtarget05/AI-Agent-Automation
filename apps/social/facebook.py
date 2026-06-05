@@ -33,7 +33,8 @@ class FacebookMessage(BaseModel):
 def verify_webhook_signature(signature: str, payload: bytes) -> bool:
     """Verify a Facebook POST webhook when an app secret is configured."""
     if not settings.fb_app_secret:
-        return True
+        logger.warning("FB_APP_SECRET is not configured")
+        return False
     if not signature:
         return False
 
@@ -55,7 +56,10 @@ async def verify_webhook(
     hub_challenge: Optional[str] = Query(default=None, alias="hub.challenge"),
 ):
     """Handle Facebook GET webhook verification."""
-    if hub_mode != "subscribe" or hub_verify_token != settings.fb_verify_token:
+    if hub_mode != "subscribe" or not hmac.compare_digest(
+        hub_verify_token or "",
+        settings.fb_verify_token,
+    ):
         logger.warning("Invalid Facebook webhook verification request")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
 
@@ -73,7 +77,7 @@ async def receive_facebook_message(request: Request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
 
     body = json.loads(raw_body)
-    logger.info("Received Facebook webhook: %s", json.dumps(body, indent=2))
+    logger.info("Received Facebook webhook with fields: %s", sorted(body))
 
     for entry in body.get("entry", []):
         for messaging_event in entry.get("messaging", []):
@@ -83,16 +87,16 @@ async def receive_facebook_message(request: Request):
 
             sender_id = messaging_event["sender"]["id"]
             if "text" not in message_data:
-                logger.info("Skipping non-text message from %s", sender_id)
+                logger.info("Skipping non-text Facebook message")
                 continue
 
             user_message = message_data["text"]
-            logger.info("Message from %s: %s", sender_id, user_message)
+            logger.info("Received text Facebook message")
 
             try:
                 reply = await generate_reply(user_message, sender_id)
                 await send_facebook_message(sender_id, reply)
-                logger.info("Reply sent to %s", sender_id)
+                logger.info("Facebook reply sent")
             except Exception as exc:
                 logger.error(
                     "Error processing Facebook message: %s", exc, exc_info=True
@@ -117,7 +121,10 @@ async def generate_reply(user_message: str, sender_id: str) -> str:
 async def send_facebook_message(recipient_id: str, text: str):
     """Send a message to a Facebook user."""
     url = "https://graph.facebook.com/v18.0/me/messages"
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {settings.fb_page_token}",
+        "Content-Type": "application/json",
+    }
     payload = {
         "recipient": {"id": recipient_id},
         "message": {"text": text},
@@ -128,10 +135,9 @@ async def send_facebook_message(recipient_id: str, text: str):
             url,
             headers=headers,
             json=payload,
-            params={"access_token": settings.fb_page_token},
         )
         response.raise_for_status()
-        logger.info("Facebook message sent to %s", recipient_id)
+        logger.info("Facebook message sent")
 
 
 @app.get("/health")

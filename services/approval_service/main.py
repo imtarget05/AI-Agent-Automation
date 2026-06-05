@@ -4,8 +4,10 @@ import uuid
 from datetime import datetime
 from .models import ApprovalRequest, ApprovalStatus, ExecutionStatus
 from .store import get_store
+from shared.internal_auth import add_internal_auth_middleware
 
 app = FastAPI(title="Approval Service")
+add_internal_auth_middleware(app)
 store = get_store()
 
 
@@ -93,10 +95,33 @@ async def record_execution(
         raise HTTPException(
             status_code=409, detail="Action must be approved before execution"
         )
+    if approval.execution_status not in {
+        ExecutionStatus.PENDING,
+        ExecutionStatus.RUNNING,
+    }:
+        raise HTTPException(status_code=409, detail="Execution result was already recorded")
 
     approval.execution_status = status
     approval.execution_result = result
     approval.execution_error = error
     approval.executed_at = datetime.utcnow()
+    store.update(approval)
+    return approval
+
+
+@app.post("/approvals/{approval_id}/execution/start", response_model=ApprovalRequest)
+async def claim_execution(approval_id: str):
+    """Claim an approved action exactly once before a mutation is dispatched."""
+    approval = store.get(approval_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.status != ApprovalStatus.APPROVED:
+        raise HTTPException(
+            status_code=409, detail="Action must be approved before execution"
+        )
+    if approval.execution_status != ExecutionStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Action execution was already claimed")
+
+    approval.execution_status = ExecutionStatus.RUNNING
     store.update(approval)
     return approval

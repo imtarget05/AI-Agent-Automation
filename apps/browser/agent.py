@@ -10,6 +10,7 @@ import json
 from shared.config import get_settings
 from shared.models import BrowserTask, BrowserResult
 from shared.llm import get_llm_router
+from shared.url_security import get_with_safe_redirects, validate_outbound_http_url
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -45,6 +46,8 @@ class BrowserAgent:
         logger.info(f"🌐 [BROWSER] Starting task: {task.instruction}")
 
         try:
+            if task.url:
+                await validate_outbound_http_url(task.url)
             # Check if browser-use is available
             import importlib.util
 
@@ -121,11 +124,10 @@ class BrowserAgent:
             # Case A: Explicit URL provided
             if task.url:
                 async with httpx.AsyncClient(
-                    follow_redirects=True,
                     timeout=30,
                     headers=headers,
                 ) as client:
-                    response = await client.get(task.url)
+                    response = await get_with_safe_redirects(client, task.url)
                     response.raise_for_status()
                     html = response.text
 

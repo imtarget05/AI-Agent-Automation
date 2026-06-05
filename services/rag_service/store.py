@@ -30,7 +30,10 @@ class RagStore:
     def __init__(self, collection: Optional[str] = None):
         self.settings = get_settings()
         self.collection = collection or self.settings.rag_collection
-        self.client = AsyncQdrantClient(url=self.settings.qdrant_url)
+        self.client = AsyncQdrantClient(
+            url=self.settings.qdrant_url,
+            api_key=self.settings.qdrant_api_key or None,
+        )
         self.router = get_llm_router()
         self._initialized = False
         self._init_lock = asyncio.Lock()

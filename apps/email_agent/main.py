@@ -4,7 +4,6 @@ Uses the cost-optimized LLMRouter to compose contextual emails based on incident
 """
 
 import json
-import logging
 from typing import Dict, Any, Optional
 import httpx
 from fastapi import FastAPI, Body, HTTPException
@@ -12,9 +11,14 @@ from contextlib import asynccontextmanager
 
 from shared.config import get_settings
 from shared.llm import get_llm_router
+from shared.internal_auth import (
+    add_internal_auth_middleware,
+    get_internal_service_headers,
+)
+from shared.observability.logging import get_logger
+from shared.observability.tracing import start_span
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("email_agent")
+logger = get_logger("email_agent")
 
 
 @asynccontextmanager
@@ -30,6 +34,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+add_internal_auth_middleware(app)
 
 llm_router = get_llm_router()
 settings = get_settings()
@@ -82,6 +87,7 @@ async def send_composed_email(
                     "is_html": True,
                     "approval_id": approval_id,
                 },
+                headers=get_internal_service_headers(),
             )
             response.raise_for_status()
             return response.json()
@@ -122,6 +128,11 @@ async def execute_task(
     logger.info(
         f"Email Agent received task: {instruction} (Tone: {tone}, Mode: {mode})"
     )
+    workflow_id = ""
+    session_id = ""
+    if isinstance(context_data, dict):
+        workflow_id = str(context_data.get("workflow_id", ""))
+        session_id = str(context_data.get("session_id", ""))
 
     prompt = (
         f"INSTRUCTION: {instruction}\n"
@@ -132,13 +143,25 @@ async def execute_task(
 
     try:
         # Generate the email draft using LLM Router
-        response_str = await llm_router.chat(
-            messages=[
-                {"role": "system", "content": EMAIL_COMPOSER_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            task="summarize",  # Cheap & fast cost routing
-        )
+        with start_span(
+            "email.compose",
+            {
+                "workflow_id": workflow_id,
+                "session_id": session_id,
+                "agent_name": "email_agent",
+            },
+        ):
+            response_str = await llm_router.chat(
+                messages=[
+                    {"role": "system", "content": EMAIL_COMPOSER_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                task="summarize",
+                workflow_id=workflow_id,
+                session_id=session_id,
+                agent_name="email_agent",
+                estimated_tokens=1200,
+            )
 
         # Clean response string if LLM returned markdown blocks
         clean_str = response_str.strip()

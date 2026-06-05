@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from shared.models import ComputerTask, ComputerResult
 from apps.computer_use.agent import ComputerUseAgent
+from shared.internal_auth import add_internal_auth_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+add_internal_auth_middleware(app)
 
 # Global agent
 _agent: ComputerUseAgent = None

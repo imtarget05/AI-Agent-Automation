@@ -3,7 +3,6 @@ RAG Service - Document ingestion and retrieval API
 """
 
 import asyncio
-import logging
 import re
 from pathlib import Path
 from typing import List
@@ -16,30 +15,41 @@ from services.rag_service.ingest import ingest_path
 from services.rag_service.store import RagStore
 from shared.config import get_settings
 from shared.llm import get_llm_router
+from shared.internal_auth import add_internal_auth_middleware
+from shared.observability.logging import get_logger
+from shared.observability.tracing import record_error, start_span
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 settings = get_settings()
+ALLOWED_DOCS_ROOT = Path("/app/docs").resolve()
 
 app = FastAPI(
     title="RAG Service",
     description="Document ingestion and retrieval",
     version="0.1.0",
 )
+add_internal_auth_middleware(app)
 
 
 class IngestRequest(BaseModel):
     path: str | None = None
     include_readme: bool = True
     extensions: list[str] | None = None
-    chunk_size: int | None = None
-    chunk_overlap: int | None = None
-    namespace: str = "docs"
+    chunk_size: int | None = Field(default=None, ge=100, le=4000)
+    chunk_overlap: int | None = Field(default=None, ge=0, le=1000)
+    namespace: str = Field(default="docs", min_length=1, max_length=64)
 
 
 class RetrieveRequest(BaseModel):
     query: str
-    top_k: int = Field(default_factory=lambda: settings.rag_default_top_k)
+    top_k: int = Field(
+        default_factory=lambda: settings.rag_default_top_k,
+        ge=1,
+        le=20,
+    )
     namespace: str | None = "docs"
+    workflow_id: str | None = None
+    session_id: str | None = None
 
 
 class RetrieveResponse(BaseModel):
@@ -51,7 +61,13 @@ def _resolve_base_path(path: str | None) -> Path:
     base = Path(path or settings.rag_docs_path)
     if not base.is_absolute():
         base = Path("/app") / base
-    return base
+    resolved = base.resolve()
+    if resolved != ALLOWED_DOCS_ROOT and ALLOWED_DOCS_ROOT not in resolved.parents:
+        raise HTTPException(
+            status_code=403,
+            detail="RAG ingestion path must stay under /app/docs",
+        )
+    return resolved
 
 
 @app.post("/ingest")
@@ -84,10 +100,22 @@ class RagManager:
         self.llm = get_llm_router()
 
     async def retrieve_advanced(
-        self, query: str, top_k: int = 5, namespace: str = "docs"
+        self,
+        query: str,
+        top_k: int = 5,
+        namespace: str = "docs",
+        workflow_id: str = "",
+        session_id: str = "",
     ) -> List[dict]:
         """Multi-query retrieval with Semantic Re-ranking"""
         logger.info(f"[RAG] Advanced retrieval for: {query}")
+        span_attrs = {
+            "workflow_id": workflow_id,
+            "session_id": session_id,
+            "agent_name": "rag_service",
+            "top_k": top_k,
+            "namespace": namespace,
+        }
 
         # 1. Query Expansion
         expansion_prompt = f"""You are a RAG assistant. Generate 3 concise alternative versions of the user query
@@ -96,9 +124,15 @@ User query: {query}
 Return only the 3 queries separated by newlines. Do not add numbering or intro."""
 
         try:
-            expansion_res = await self.llm.chat(
-                [{"role": "user", "content": expansion_prompt}], task="planning"
-            )
+            with start_span("rag.query_expansion", span_attrs):
+                expansion_res = await self.llm.chat(
+                    [{"role": "user", "content": expansion_prompt}],
+                    task="planning",
+                    workflow_id=workflow_id,
+                    session_id=session_id,
+                    agent_name="rag_service",
+                    estimated_tokens=800,
+                )
             queries = [q.strip() for q in expansion_res.split("\n") if q.strip()][:3]
             queries.append(query)  # Include original
             logger.info(f"[RAG] Expanded queries: {queries}")
@@ -113,7 +147,9 @@ Return only the 3 queries separated by newlines. Do not add numbering or intro."
         search_tasks = [
             self.store.query(q, top_k=top_k * 2, namespace=namespace) for q in queries
         ]
-        search_results = await asyncio.gather(*search_tasks)
+        with start_span("rag.vector_search", span_attrs) as search_span:
+            search_results = await asyncio.gather(*search_tasks)
+            search_span.set_attribute("rag.query_count", len(queries))
 
         for results in search_results:
             for r in results:
@@ -144,9 +180,15 @@ Context snippets:
 Top {top_k} Indices:"""
 
             try:
-                rerank_res = await self.llm.chat(
-                    [{"role": "user", "content": rerank_prompt}], task="summarize"
-                )
+                with start_span("rag.rerank", span_attrs):
+                    rerank_res = await self.llm.chat(
+                        [{"role": "user", "content": rerank_prompt}],
+                        task="summarize",
+                        workflow_id=workflow_id,
+                        session_id=session_id,
+                        agent_name="rag_service",
+                        estimated_tokens=1200,
+                    )
                 # Parse indices like "0, 2, 5"
                 indices = [int(idx.strip()) for idx in re.findall(r"\d+", rerank_res)]
                 ranked_results = []
@@ -185,7 +227,12 @@ Rate relevance from 0.0 to 1.0 (where 1.0 is highly relevant, 0.0 is completely 
 Return ONLY the numerical score."""
                 try:
                     score_res = await self.llm.chat(
-                        [{"role": "user", "content": grade_prompt}], task="summarize"
+                        [{"role": "user", "content": grade_prompt}],
+                        task="summarize",
+                        workflow_id=workflow_id,
+                        session_id=session_id,
+                        agent_name="rag_service",
+                        estimated_tokens=900,
                     )
                     score = float(re.search(r"\d+\.?\d*", score_res).group())
                     return chunk, score
@@ -223,23 +270,37 @@ graph_rag_service = GraphRagService()
 @app.post("/retrieve", response_model=RetrieveResponse)
 async def retrieve_docs(request: RetrieveRequest):
     """Retrieve top-K relevant chunks using advanced RAG manager and GraphRAG topology enrichment"""
-    try:
-        manager = RagManager()
-        results = await manager.retrieve_advanced(
-            query=request.query,
-            top_k=request.top_k,
-            namespace=request.namespace or "docs",
-        )
+    with start_span(
+        "rag.retrieval",
+        {
+            "workflow_id": request.workflow_id or "",
+            "session_id": request.session_id or "",
+            "agent_name": "rag_service",
+            "top_k": request.top_k,
+            "namespace": request.namespace or "docs",
+        },
+    ) as span:
+        try:
+            manager = RagManager()
+            results = await manager.retrieve_advanced(
+                query=request.query,
+                top_k=request.top_k,
+                namespace=request.namespace or "docs",
+                workflow_id=request.workflow_id or "",
+                session_id=request.session_id or "",
+            )
 
-        # Enrich the retrieved results with topological relationships (GraphRAG)
-        enriched_results = graph_rag_service.enrich_retrieval_with_graph(
-            query=request.query, vector_results=results
-        )
+            enriched_results = graph_rag_service.enrich_retrieval_with_graph(
+                query=request.query, vector_results=results
+            )
+            span.set_attribute("status", "success")
+            span.set_attribute("rag.result_count", len(enriched_results))
 
-        return RetrieveResponse(query=request.query, results=enriched_results)
-    except Exception as e:
-        logger.error(f"Retrieve failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+            return RetrieveResponse(query=request.query, results=enriched_results)
+        except Exception as e:
+            record_error(span, e)
+            logger.error(f"Retrieve failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")

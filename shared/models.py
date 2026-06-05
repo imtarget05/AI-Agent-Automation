@@ -23,8 +23,11 @@ class ModuleType(str, Enum):
     DEVOPS = "devops"
     EMAIL = "email"
     TOOL = "tool"
+    MCP = "mcp"
     GUARDRAIL = "guardrail"
     REPORT = "report"
+    AGENTSCOPE = "agentscope"
+    CLAW = "claw"
 
 
 class TaskStatus(str, Enum):
@@ -46,6 +49,8 @@ class Task(BaseModel):
     id: str
     agent: ModuleType
     instruction: str
+    context: dict[str, Any] = Field(default_factory=dict)
+    context_from: list[str] = Field(default_factory=list)
     expected_output_schema: Optional[dict] = None
     priority: int = 0
     timeout_seconds: int = 300
@@ -77,15 +82,20 @@ class AgentState(TypedDict, total=False):
     """Global state passed through LangGraph"""
 
     session_id: str
+    workflow_id: str
     user_input: str
     allowed_modules: Optional[list[ModuleType]]
     plan: Optional[ExecutionPlan]
     results: Annotated[dict[str, TaskResult], operator.or_]  # Merge dictionaries
     messages: Annotated[list[dict], operator.add]  # Append to list
-    current_agent: Optional[ModuleType]
+    next_tasks: list[str]  # IDs of tasks to execute next (parallel support)
+    current_tasks: list[str]  # IDs of tasks currently running
     final_answer: Optional[str]
     error: Optional[str]
     approved_tasks: list[str]
+    is_complete: bool
+    supervisor_iterations: int
+    open_source_context: Optional[str]
 
 
 class ChatMessage(BaseModel):

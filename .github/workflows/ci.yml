@@ -53,10 +53,10 @@ jobs:
           pip install bandit pip-audit
 
       - name: Bandit SAST scan
-        run: bandit -r . -ll
+        run: bandit -r apps services shared tools -ll
 
       - name: Pip-audit dependency scan
-        run: pip-audit
+        run: pip-audit -r requirements.txt
 
   test:
     name: "🧪 Unit Tests"

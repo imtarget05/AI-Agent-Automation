@@ -2,6 +2,7 @@ x-llm-environment: &llm-environment
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-4o}
+  REASONING_MODEL: ${REASONING_MODEL:-}
   FALLBACK_MODEL: ${FALLBACK_MODEL:-claude-sonnet-4-5}
   EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
@@ -9,8 +10,21 @@ x-llm-environment: &llm-environment
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
   OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-r1:8b}
   OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
-  OLLAMA_TASK_TYPES: '${OLLAMA_TASK_TYPES:-["classification","summarize","parsing"]}'
+  OLLAMA_TASK_TYPES: '${OLLAMA_TASK_TYPES:-["classification","summarize","parsing","draft","report_draft"]}'
   MONITORING_SERVICE_URL: http://monitoring:8005
+  SANDBOX_DEMO_MODE: ${SANDBOX_DEMO_MODE:-false}
+  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-change-in-prod}
+  QDRANT_API_KEY: ${QDRANT_API_KEY:-dev-qdrant-key-change-in-prod}
+  OTEL_ENABLED: ${OTEL_ENABLED:-false}
+  OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-ai-agent-automation}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel_collector:4317}
+  OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
+  OTEL_LOG_LEVEL: ${OTEL_LOG_LEVEL:-INFO}
+  MAX_TOKENS_PER_REQUEST: ${MAX_TOKENS_PER_REQUEST:-20000}
+  MAX_TOKENS_PER_WORKFLOW: ${MAX_TOKENS_PER_WORKFLOW:-80000}
+  MAX_LLM_CALLS_PER_WORKFLOW: ${MAX_LLM_CALLS_PER_WORKFLOW:-20}
+  MAX_COST_PER_WORKFLOW_USD: ${MAX_COST_PER_WORKFLOW_USD:-2.00}
+  MAX_COST_PER_USER_DAILY_USD: ${MAX_COST_PER_USER_DAILY_USD:-10.00}
 
 services:
   # ──── Infrastructure ────
@@ -19,10 +33,10 @@ services:
     container_name: agent_postgres
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev-postgres-password-change-in-prod}
       POSTGRES_DB: agent_db
-    ports:
-      - "5432:5432"
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -34,13 +48,15 @@ services:
   redis:
     image: redis:7-alpine
     container_name: agent_redis
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
+    expose:
+      - "6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-dev-redis-password-change-in-prod}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-dev-redis-password-change-in-prod}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -48,32 +64,55 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: agent_qdrant
-    ports:
-      - "6333:6333"
+    expose:
+      - "6333"
     environment:
-      QDRANT_API_KEY: your_api_key
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-dev-qdrant-key-change-in-prod}
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD-SHELL", "curl -fsS -H \"api-key: $$QDRANT__SERVICE__API_KEY\" http://localhost:6333/health"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  otel_collector:
+    profiles: ["observability"]
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: ai-agent-automation-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./infra/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    depends_on:
+      - jaeger
+
+  jaeger:
+    profiles: ["observability"]
+    image: jaegertracing/all-in-one:latest
+    container_name: agent_jaeger
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:14250:14250"
+
   ollama:
+    profiles: ["gpu"]
     image: ollama/ollama:latest
     container_name: agent_ollama
-    ports:
-      - "11434:11434"
+    expose:
+      - "11434"
     volumes:
       - ollama_data:/root/.ollama
     entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull deepseek-r1:8b && wait"]
 
   n8n:
+    profiles: ["workflows"]
     image: docker.n8n.io/n8nio/n8n:latest
     container_name: agent_n8n
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     environment:
       - N8N_HOST=localhost
       - N8N_PORT=5678
@@ -92,12 +131,12 @@ services:
       target: gateway
     container_name: agent_gateway
     ports:
-      - "8000:8000"
+      - "${GATEWAY_BIND_ADDRESS:-127.0.0.1}:8000:8000"
     environment:
       <<: *llm-environment
       ENV: ${ENV:-development}
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres_password@postgres:5432/agent_db
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-dev-postgres-password-change-in-prod}@postgres:5432/agent_db
+      REDIS_URL: redis://:${REDIS_PASSWORD:-dev-redis-password-change-in-prod}@redis:6379
       QDRANT_URL: http://qdrant:6333
       API_SECRET_KEY: ${API_SECRET_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -107,6 +146,14 @@ services:
       AIOPS_AGENT_SERVICE_URL: http://aiops_agent:8013
       RCA_AGENT_SERVICE_URL: http://rca_agent:8014
       DEVOPS_AGENT_SERVICE_URL: http://devops_agent:8015
+      AGENTSCOPE_AGENT_SERVICE_URL: http://agentscope_agent:8017
+      AGENTSCOPE_ENABLED: ${AGENTSCOPE_ENABLED:-false}
+      CLAW_ENABLED: ${CLAW_ENABLED:-false}
+      CLAW_BINARY_PATH: ${CLAW_BINARY_PATH:-}
+      CLAW_WORKING_DIRECTORY: ${CLAW_WORKING_DIRECTORY:-}
+      CLAW_TIMEOUT_SECONDS: ${CLAW_TIMEOUT_SECONDS:-300}
+      MCP_ENABLED: ${MCP_ENABLED:-true}
+      MCP_SERVERS: '${MCP_SERVERS:-{}}'
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,10 +161,11 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
-    volumes:
-      - ./apps/gateway:/app/apps/gateway
-      - ./shared:/app/shared
-    command: uvicorn apps.gateway.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   monitoring:
     build:
@@ -125,21 +173,23 @@ services:
       dockerfile: Dockerfile
       target: monitoring
     container_name: agent_monitoring
-    ports:
-      - "8005:8005"
+    expose:
+      - "8005"
     environment:
       ENV: ${ENV:-development}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      MONITORING_DATABASE_URL: postgresql+psycopg://postgres:postgres_password@postgres:5432/agent_db
+      MONITORING_DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-dev-postgres-password-change-in-prod}@postgres:5432/agent_db
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-change-in-prod}
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./apps/monitoring:/app/apps/monitoring
-      - ./shared:/app/shared
-    command: uvicorn apps.monitoring.main:app --host 0.0.0.0 --port 8005 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   dashboard:
     build:
@@ -148,33 +198,39 @@ services:
       target: dashboard
     container_name: agent_dashboard
     ports:
-      - "8006:8006"
+      - "${DASHBOARD_BIND_ADDRESS:-127.0.0.1}:8006:8006"
     environment:
       ENV: ${ENV:-development}
       MONITORING_URL: http://monitoring:8005
+      DASHBOARD_GATEWAY_URL: ${DASHBOARD_GATEWAY_URL:-http://localhost:8000}
     depends_on:
       - monitoring
-    volumes:
-      - ./apps/dashboard:/app/apps/dashboard
-    command: uvicorn apps.dashboard.main:app --host 0.0.0.0 --port 8006 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   # ──── AIOps & Platform Agents ────
   aiops_agent:
     build: { context: ., dockerfile: Dockerfile, target: aiops_agent }
     container_name: agent_aiops_agent
-    ports: ["8013:8013"]
+    expose: ["8013"]
     environment:
       <<: *llm-environment
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       TOOL_SERVICE_URL: http://tool_service:8008
-    volumes: ["./apps/aiops_agent:/app/apps/aiops_agent", "./shared:/app/shared"]
-    command: uvicorn apps.aiops_agent.main:app --host 0.0.0.0 --port 8013 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8013/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   rca_agent:
     build: { context: ., dockerfile: Dockerfile, target: rca_agent }
     container_name: agent_rca_agent
-    ports: ["8014:8014"]
+    expose: ["8014"]
     environment:
       <<: *llm-environment
       ENV: ${ENV:-development}
@@ -183,46 +239,75 @@ services:
       TOOL_SERVICE_URL: http://tool_service:8008
       RCA_MAX_REASONING_STEPS: ${RCA_MAX_REASONING_STEPS:-5}
       ACCURACY_GUARDRAIL_ENABLED: ${ACCURACY_GUARDRAIL_ENABLED:-true}
-    volumes: ["./apps/rca_agent:/app/apps/rca_agent", "./shared:/app/shared"]
-    command: uvicorn apps.rca_agent.main:app --host 0.0.0.0 --port 8014 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8014/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   devops_agent:
     build: { context: ., dockerfile: Dockerfile, target: devops_agent }
     container_name: agent_devops_agent
-    ports: ["8015:8015"]
+    expose: ["8015"]
     environment:
       <<: *llm-environment
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes: ["./apps/devops_agent:/app/apps/devops_agent", "./shared:/app/shared"]
-    command: uvicorn apps.devops_agent.main:app --host 0.0.0.0 --port 8015 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8015/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   report_agent:
     build: { context: ., dockerfile: Dockerfile, target: report_agent }
     container_name: agent_report_agent
-    ports: ["8012:8012"]
+    expose: ["8012"]
     environment:
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes: ["./apps/report_agent:/app/apps/report_agent", "./shared:/app/shared"]
-    command: uvicorn apps.report_agent.main:app --host 0.0.0.0 --port 8012 --reload
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-change-in-prod}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8012/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  agentscope_agent:
+    profiles: ["agentscope"]
+    build: { context: ., dockerfile: Dockerfile, target: agentscope_agent }
+    container_name: agent_agentscope_agent
+    expose: ["8017"]
+    environment:
+      <<: *llm-environment
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      AGENTSCOPE_ENABLED: ${AGENTSCOPE_ENABLED:-false}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8017/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   email_agent:
     build: { context: ., dockerfile: Dockerfile, target: email_agent }
     container_name: agent_email_agent
-    ports: ["8009:8009"]
+    expose: ["8009"]
     environment:
       <<: *llm-environment
       ENV: ${ENV:-development}
       TOOL_SERVICE_URL: http://tool_service:8008
-    volumes: ["./apps/email_agent:/app/apps/email_agent", "./shared:/app/shared"]
-    command: uvicorn apps.email_agent.main:app --host 0.0.0.0 --port 8009 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   # ──── Platform Infrastructure Services ────
   rag_service:
     build: { context: ., dockerfile: Dockerfile, target: rag_service }
     container_name: agent_rag_service
-    ports: ["8007:8007"]
+    expose: ["8007"]
     environment:
       <<: *llm-environment
       ENV: ${ENV:-development}
@@ -235,13 +320,16 @@ services:
       RAG_VERIFICATION_ENABLED: ${RAG_VERIFICATION_ENABLED:-true}
       RAG_GRADING_THRESHOLD: ${RAG_GRADING_THRESHOLD:-0.7}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes: ["./services/rag_service:/app/services/rag_service", "./shared:/app/shared", "./docs:/app/docs", "./README.md:/app/README.md"]
-    command: uvicorn services.rag_service.main:app --host 0.0.0.0 --port 8007 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   tool_service:
     build: { context: ., dockerfile: Dockerfile, target: tool_service }
     container_name: agent_tool_service
-    ports: ["8008:8008"]
+    expose: ["8008"]
     environment:
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -251,49 +339,64 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       GUARDRAIL_SERVICE_URL: http://guardrail_service:8010
-    volumes: ["./tools:/app/tools", "./shared:/app/shared", "./docs:/app/docs"]
-    command: uvicorn tools.main:app --host 0.0.0.0 --port 8008 --reload
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-change-in-prod}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   guardrail_service:
     build: { context: ., dockerfile: Dockerfile, target: guardrail_service }
     container_name: agent_guardrail_service
-    ports: ["8010:8010"]
+    expose: ["8010"]
     environment:
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes: ["./services/guardrail_service:/app/services/guardrail_service", "./shared:/app/shared"]
-    command: uvicorn services.guardrail_service.main:app --host 0.0.0.0 --port 8010 --reload
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-change-in-prod}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   approval_service:
     build: { context: ., dockerfile: Dockerfile, target: approval_service }
     container_name: agent_approval_service
-    ports: ["8011:8011"]
+    expose: ["8011"]
     environment:
       ENV: ${ENV:-development}
-    volumes: 
-      - ./services/approval_service:/app/services/approval_service
-      - ./shared:/app/shared
-      - ./data:/app/data
-    command: uvicorn services.approval_service.main:app --host 0.0.0.0 --port 8011 --reload
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-change-in-prod}
+    volumes:
+      - approval_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   eval_service:
     build: { context: ., dockerfile: Dockerfile, target: eval_service }
     container_name: agent_eval_service
-    ports: ["8016:8016"]
+    expose: ["8016"]
     environment:
       ENV: ${ENV:-development}
-    volumes: ["./services/eval_service:/app/services/eval_service", "./shared:/app/shared"]
-    command: uvicorn services.eval_service.main:app --host 0.0.0.0 --port 8016 --reload
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-change-in-prod}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8016/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   # ──── Legacy Personal Agents ────
   social:
     build: { context: ., dockerfile: Dockerfile, target: social }
     container_name: agent_social
-    ports: ["8002:8002"]
+    ports: ["${SOCIAL_BIND_ADDRESS:-127.0.0.1}:8002:8002"]
     environment:
       <<: *llm-environment
       ENV: ${ENV:-development}
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD:-dev-redis-password-change-in-prod}@redis:6379
       QDRANT_URL: http://qdrant:6333
       FB_PAGE_TOKEN: ${FB_PAGE_TOKEN:-}
       FB_VERIFY_TOKEN: ${FB_VERIFY_TOKEN:-my_webhook_secret}
@@ -303,31 +406,63 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes: ["./apps/social:/app/apps/social", "./shared:/app/shared"]
-    command: uvicorn apps.social.main:app --host 0.0.0.0 --port 8002 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   browser:
     build: { context: ., dockerfile: Dockerfile, target: browser }
     container_name: agent_browser
-    ports: ["8003:8003"]
+    expose: ["8003"]
     environment:
       <<: *llm-environment
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes: ["./apps/browser:/app/apps/browser", "./shared:/app/shared"]
-    command: uvicorn apps.browser.main:app --host 0.0.0.0 --port 8003 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   computer_use:
+    profiles: ["unsafe-computer-use"]
     build: { context: ., dockerfile: Dockerfile, target: computer_use }
     container_name: agent_computer_use
-    ports: ["8004:8004"]
+    expose: ["8004"]
     environment:
       <<: *llm-environment
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DISPLAY: ${DISPLAY:-:0}
-    volumes: ["./apps/computer_use:/app/apps/computer_use", "./shared:/app/shared", "/tmp/.X11-unix:/tmp/.X11-unix:rw"]
-    command: uvicorn apps.computer_use.main:app --host 0.0.0.0 --port 8004 --reload
+    volumes: ["/tmp/.X11-unix:/tmp/.X11-unix:rw"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  custom_ui:
+    profiles: ["custom-ui"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: custom_ui
+    container_name: agent_custom_ui
+    ports:
+      - "${CUSTOM_UI_BIND_ADDRESS:-127.0.0.1}:8001:8001"
+    environment:
+      ENV: ${ENV:-development}
+      GATEWAY_URL: http://gateway:8000/execute
+      API_SECRET_KEY: ${API_SECRET_KEY}
+    depends_on:
+      - gateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
@@ -335,6 +470,7 @@ volumes:
   qdrant_data:
   ollama_data:
   n8n_data:
+  approval_data:
 
 networks:
   default:

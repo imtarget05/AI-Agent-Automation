@@ -608,5 +608,461 @@
       "error": null
     },
     "error": null
+  },
+  "13daee03-1cc9-4c22-98e6-68055297ab33": {
+    "task_id": "13daee03-1cc9-4c22-98e6-68055297ab33",
+    "session_id": "20e090d6-39b0-4826-a6be-ebd840a50c55",
+    "status": "completed",
+    "created_at": "2026-05-31T09:57:24.213086",
+    "updated_at": "2026-05-31T09:57:24.217047",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "0dde3eea-bcaa-4478-97e0-66480d13b4e1": {
+    "task_id": "0dde3eea-bcaa-4478-97e0-66480d13b4e1",
+    "session_id": "b12b733e-5ce8-4122-88eb-f2043fd4164d",
+    "status": "completed",
+    "created_at": "2026-06-01T03:58:06.886660",
+    "updated_at": "2026-06-01T03:58:06.889777",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "2d2a2f5c-3b87-49c2-a5ef-91cd12fd0371": {
+    "task_id": "2d2a2f5c-3b87-49c2-a5ef-91cd12fd0371",
+    "session_id": "f4c4cf35-c2af-493f-9e05-f61da218de54",
+    "status": "completed",
+    "created_at": "2026-06-01T03:58:50.236493",
+    "updated_at": "2026-06-01T03:58:50.240491",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "c6fd69cf-a33f-4449-b615-77f335a54c4b": {
+    "task_id": "c6fd69cf-a33f-4449-b615-77f335a54c4b",
+    "session_id": "9f671ca9-ccc5-4d7d-a3b6-342dbe1ff54e",
+    "status": "completed",
+    "created_at": "2026-06-01T03:59:16.517662",
+    "updated_at": "2026-06-01T03:59:16.521648",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "7fb96fd7-b92c-4106-b9d1-49be3791d6f0": {
+    "task_id": "7fb96fd7-b92c-4106-b9d1-49be3791d6f0",
+    "session_id": "375a2e0f-105f-49c3-92d1-6a1c3f84cd7c",
+    "status": "completed",
+    "created_at": "2026-06-01T03:59:45.816264",
+    "updated_at": "2026-06-01T03:59:45.821493",
+    "user_input": "Analyze payment-api metrics",
+    "callback_url": null,
+    "modules": [
+      "aiops"
+    ],
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "f9e32c06-a6ad-4e05-ae09-b73697a3eb63": {
+    "task_id": "f9e32c06-a6ad-4e05-ae09-b73697a3eb63",
+    "session_id": "a58cbb2e-5e78-4cb8-93e6-f7f35b92c441",
+    "status": "completed",
+    "created_at": "2026-06-01T03:59:53.108366",
+    "updated_at": "2026-06-01T03:59:53.115066",
+    "user_input": "Quick metric scan",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "9f3ee3ab-9162-460a-9318-0a88d9719df1": {
+    "task_id": "9f3ee3ab-9162-460a-9318-0a88d9719df1",
+    "session_id": "772d0aa4-f9a2-4a72-be4a-006a9f42521e",
+    "status": "completed",
+    "created_at": "2026-06-01T04:02:03.957847",
+    "updated_at": "2026-06-01T04:02:03.962553",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "7699e44c-83f2-4bbd-8206-6e0b00d91975": {
+    "task_id": "7699e44c-83f2-4bbd-8206-6e0b00d91975",
+    "session_id": "4cfd09b5-788d-4f3d-93cb-a6801810fef2",
+    "status": "completed",
+    "created_at": "2026-06-01T04:02:51.508838",
+    "updated_at": "2026-06-01T04:02:51.514845",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "7de7d69c-d594-48c3-8681-f29b6444edeb": {
+    "task_id": "7de7d69c-d594-48c3-8681-f29b6444edeb",
+    "session_id": "1fedc805-b222-4fb8-a5a4-7b79d4245182",
+    "status": "completed",
+    "created_at": "2026-06-01T04:03:20.786697",
+    "updated_at": "2026-06-01T04:03:20.792259",
+    "user_input": "Analyze payment-api metrics",
+    "callback_url": null,
+    "modules": [
+      "aiops"
+    ],
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "f59569cb-3980-46aa-aac6-d241544e8615": {
+    "task_id": "f59569cb-3980-46aa-aac6-d241544e8615",
+    "session_id": "5d939413-c02d-4efc-9cf9-86ac599facd5",
+    "status": "completed",
+    "created_at": "2026-06-01T04:03:28.185929",
+    "updated_at": "2026-06-01T04:03:28.191465",
+    "user_input": "Quick metric scan",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "eea73210-9d70-46fd-a9bd-46e4238876db": {
+    "task_id": "eea73210-9d70-46fd-a9bd-46e4238876db",
+    "session_id": "2c60ea69-6544-4f6b-a29b-3456b36bdcc6",
+    "status": "completed",
+    "created_at": "2026-06-01T04:05:10.732453",
+    "updated_at": "2026-06-01T04:05:10.737568",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "cbb9cb69-4b50-459b-bfc7-01f9a1d3c30e": {
+    "task_id": "cbb9cb69-4b50-459b-bfc7-01f9a1d3c30e",
+    "session_id": "63615162-1dba-41d8-8853-74ca060b53bd",
+    "status": "completed",
+    "created_at": "2026-06-01T04:05:39.841635",
+    "updated_at": "2026-06-01T04:05:39.845066",
+    "user_input": "Analyze payment-api metrics",
+    "callback_url": null,
+    "modules": [
+      "aiops"
+    ],
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "10525e03-dc19-4789-98c0-741f9386f75a": {
+    "task_id": "10525e03-dc19-4789-98c0-741f9386f75a",
+    "session_id": "8788d2d5-4535-41b3-8a6d-72e4e1894d00",
+    "status": "completed",
+    "created_at": "2026-06-01T04:05:47.124414",
+    "updated_at": "2026-06-01T04:05:47.127422",
+    "user_input": "Quick metric scan",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "5c6386e7-a65d-4b7d-a6b3-5589297b2e02": {
+    "task_id": "5c6386e7-a65d-4b7d-a6b3-5589297b2e02",
+    "session_id": "826b0d88-68fd-45a0-a11f-953e42c579bf",
+    "status": "completed",
+    "created_at": "2026-06-01T04:14:48.808593",
+    "updated_at": "2026-06-01T04:14:48.812392",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "547192c1-8157-461f-ad0d-ee8564d739f7": {
+    "task_id": "547192c1-8157-461f-ad0d-ee8564d739f7",
+    "session_id": "ca2f87ee-87d9-46e0-a4e2-5652db7eb227",
+    "status": "completed",
+    "created_at": "2026-06-01T04:15:17.997273",
+    "updated_at": "2026-06-01T04:15:18.000885",
+    "user_input": "Analyze payment-api metrics",
+    "callback_url": null,
+    "modules": [
+      "aiops"
+    ],
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "089ed5db-430a-40b2-8821-cbc2c6c1df21": {
+    "task_id": "089ed5db-430a-40b2-8821-cbc2c6c1df21",
+    "session_id": "02eb09b7-d634-417e-b193-2343d074b0a6",
+    "status": "completed",
+    "created_at": "2026-06-01T04:15:25.297679",
+    "updated_at": "2026-06-01T04:15:25.302229",
+    "user_input": "Quick metric scan",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "91240911-3fbe-4b80-8725-adcbd2fc7cb1": {
+    "task_id": "91240911-3fbe-4b80-8725-adcbd2fc7cb1",
+    "session_id": "6248c4d1-c59a-4051-a17c-d9965be13942",
+    "status": "completed",
+    "created_at": "2026-06-01T04:16:57.882978",
+    "updated_at": "2026-06-01T04:16:57.890750",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "9e6f3ad1-cc45-46e3-9402-a79cbd2e3b91": {
+    "task_id": "9e6f3ad1-cc45-46e3-9402-a79cbd2e3b91",
+    "session_id": "18d9e5dc-b4ba-4149-a591-120b0ed74b23",
+    "status": "completed",
+    "created_at": "2026-06-01T04:17:27.036367",
+    "updated_at": "2026-06-01T04:17:27.040425",
+    "user_input": "Analyze payment-api metrics",
+    "callback_url": null,
+    "modules": [
+      "aiops"
+    ],
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "3063c745-8d70-4c2d-b54b-053304261fc2": {
+    "task_id": "3063c745-8d70-4c2d-b54b-053304261fc2",
+    "session_id": "f7e47abd-fddb-4d6d-97c1-bb914d4bf48a",
+    "status": "completed",
+    "created_at": "2026-06-01T04:17:34.299763",
+    "updated_at": "2026-06-01T04:17:34.304325",
+    "user_input": "Quick metric scan",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "b35ab8ef-b34f-4fb5-bb0f-fa1902b94d6e": {
+    "task_id": "b35ab8ef-b34f-4fb5-bb0f-fa1902b94d6e",
+    "session_id": "fbe53d24-ea8c-47d7-9cc5-75a58c34e8d5",
+    "status": "completed",
+    "created_at": "2026-06-01T04:39:39.916499",
+    "updated_at": "2026-06-01T04:39:39.921048",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "95a1aa5f-9254-4f3f-b010-0a52753051c7": {
+    "task_id": "95a1aa5f-9254-4f3f-b010-0a52753051c7",
+    "session_id": "c237c892-bf2d-4733-b669-32002e830c40",
+    "status": "completed",
+    "created_at": "2026-06-01T04:40:09.306840",
+    "updated_at": "2026-06-01T04:40:09.314792",
+    "user_input": "Analyze payment-api metrics",
+    "callback_url": null,
+    "modules": [
+      "aiops"
+    ],
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "953dcb22-b86e-4e28-a8ad-cf19ab8062eb": {
+    "task_id": "953dcb22-b86e-4e28-a8ad-cf19ab8062eb",
+    "session_id": "132743d1-07b2-4525-8ceb-366c8183133d",
+    "status": "completed",
+    "created_at": "2026-06-01T04:40:16.604484",
+    "updated_at": "2026-06-01T04:40:16.608703",
+    "user_input": "Quick metric scan",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "3d9b7873-ca28-4af7-9afd-c37e0850e6b8": {
+    "task_id": "3d9b7873-ca28-4af7-9afd-c37e0850e6b8",
+    "session_id": "decb1f27-d4c2-4bf3-ac97-8ec8145f8f49",
+    "status": "completed",
+    "created_at": "2026-06-01T05:09:52.500736",
+    "updated_at": "2026-06-01T05:09:52.507146",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "805e169a-6bbf-4061-b134-7e4d941f4f02": {
+    "task_id": "805e169a-6bbf-4061-b134-7e4d941f4f02",
+    "session_id": "953c1607-1800-4f17-b738-c0bc0fc8f29d",
+    "status": "completed",
+    "created_at": "2026-06-01T15:46:43.528931",
+    "updated_at": "2026-06-01T15:46:43.531929",
+    "user_input": "run a background check",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "done",
+      "error": null
+    },
+    "error": null
+  },
+  "91127811-f978-4a55-9ba4-b257a39d8af0": {
+    "task_id": "91127811-f978-4a55-9ba4-b257a39d8af0",
+    "session_id": "46ddf058-d8d4-47bc-b0db-e5d2c3107cdc",
+    "status": "completed",
+    "created_at": "2026-06-01T15:47:12.739239",
+    "updated_at": "2026-06-01T15:47:12.742609",
+    "user_input": "Analyze payment-api metrics",
+    "callback_url": null,
+    "modules": [
+      "aiops"
+    ],
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
+  },
+  "0889a355-8e95-421a-9260-8c25ce1def38": {
+    "task_id": "0889a355-8e95-421a-9260-8c25ce1def38",
+    "session_id": "12720ce0-b209-4590-8e79-b67bdee81361",
+    "status": "completed",
+    "created_at": "2026-06-01T15:47:20.055078",
+    "updated_at": "2026-06-01T15:47:20.059463",
+    "user_input": "Quick metric scan",
+    "callback_url": null,
+    "modules": null,
+    "result": {
+      "plan": null,
+      "results": {},
+      "final_answer": "Analysis complete. Root cause: HikariPool connection exhaustion in payment-api due to database connection leak. Recommended action: restart pod and increase pool size.",
+      "error": null
+    },
+    "error": null
   }
 }

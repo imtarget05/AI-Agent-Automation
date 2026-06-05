@@ -12,6 +12,7 @@ from tenacity import (
 )
 
 from shared.config import get_settings
+from shared.internal_auth import get_internal_service_headers
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,12 @@ class GuardrailClient:
         )
         async def _do_call():
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.request(method, url, json=json)
+                response = await client.request(
+                    method,
+                    url,
+                    json=json,
+                    headers=get_internal_service_headers(),
+                )
                 response.raise_for_status()
                 return response
 

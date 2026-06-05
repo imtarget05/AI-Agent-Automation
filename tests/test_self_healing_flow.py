@@ -7,6 +7,7 @@ class FakeApprovalClient:
         self.approval = approval or {}
         self.created = []
         self.recorded = []
+        self.claimed = []
 
     async def get_approval(self, approval_id):
         return self.approval
@@ -32,6 +33,10 @@ class FakeApprovalClient:
                 "error": error,
             }
         )
+        return self.approval
+
+    async def claim_execution(self, approval_id):
+        self.claimed.append(approval_id)
         return self.approval
 
 
@@ -109,6 +114,7 @@ def test_tool_service_executes_only_exact_approved_callback(monkeypatch):
         }
     ]
     assert guardrails.calls[0]["action"] == "restart_deployment"
+    assert approval_client.claimed == ["approval-1"]
 
 
 def test_gateway_creates_durable_self_healing_approval(monkeypatch):

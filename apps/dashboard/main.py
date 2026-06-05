@@ -29,7 +29,6 @@ async def get_config():
         "gateway_url": settings.dashboard_gateway_url,
         "env": settings.env,
         "version": settings.app_version,
-        "api_key": settings.api_secret_key,
     }
 
 
@@ -42,6 +41,16 @@ async def serve_dashboard():
     return {
         "message": "Dashboard assets not found. Run npm build in dashboard directory."
     }
+
+
+@app.get("/architecture", include_in_schema=False)
+async def serve_architecture():
+    """Serve the interactive architecture diagram"""
+    arch_path = os.path.join(os.path.dirname(__file__), "static", "architecture.html")
+    if os.path.exists(arch_path):
+        return FileResponse(arch_path)
+    return {"message": "Architecture visualization assets not found."}
+
 
 
 @app.get("/health")

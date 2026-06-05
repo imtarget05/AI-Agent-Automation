@@ -26,6 +26,7 @@ from shared.metrics import (
     calculate_success_rate,
     calculate_cost_per_request,
 )
+from shared.internal_auth import add_internal_auth_middleware
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -105,6 +106,7 @@ app = FastAPI(
     description="System metrics collection and analytics",
     version="1.0.0",
 )
+add_internal_auth_middleware(app)
 
 # ─── Dependencies ───
 

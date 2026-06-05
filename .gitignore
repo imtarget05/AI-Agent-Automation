@@ -19,6 +19,11 @@ htmlcov/
 *.log
 .env.local
 .env.*.local
+.runtime/
+data/gateway_tasks.json
+data/approvals.json
+data/open_source_knowledge_index.json
+data/*.db
 
 # Docker
 docker-compose.override.yml

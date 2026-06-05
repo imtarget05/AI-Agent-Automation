@@ -12,6 +12,7 @@ from shared.config import get_bind_host
 from uuid import uuid4
 from fastapi import FastAPI, Body, HTTPException
 from contextlib import asynccontextmanager
+from shared.internal_auth import add_internal_auth_middleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("guardrail_service")
@@ -30,6 +31,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+add_internal_auth_middleware(app)
 
 # Dangerous patterns commonly used in Prompt Injections
 PROMPT_INJECTION_PATTERNS = [

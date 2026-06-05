@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, Literal, Optional
 
 from fastapi import FastAPI
@@ -10,9 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from shared.config import get_settings
 from shared.llm import get_llm_router
+from shared.internal_auth import add_internal_auth_middleware
+from shared.observability.logging import get_logger
+from shared.observability.tracing import start_span
 
 app = FastAPI(title="DevOps Agent")
-logger = logging.getLogger(__name__)
+add_internal_auth_middleware(app)
+logger = get_logger(__name__)
 settings = get_settings()
 llm_router = get_llm_router()
 
@@ -104,6 +107,8 @@ async def execute_task(req: TaskRequest):
 async def _analyze_task(req: TaskRequest) -> Dict[str, Any]:
     """Use the LLM for analysis only; LLM output is never executed."""
     try:
+        workflow_id = str(req.context.get("workflow_id", ""))
+        session_id = str(req.context.get("session_id", ""))
         prompt = f"""You are a DevOps and Platform Engineer.
 Analyze the following request and suggest a fix or configuration change.
 Instruction: {req.instruction}
@@ -113,10 +118,27 @@ Provide a detailed technical suggestion, including YAML or Dockerfile snippets i
 Do not claim that a live change was applied. Kubernetes writes must be returned as an
 explicit structured proposal and approved through the gateway self-healing workflow.
 """
-        suggestion = await llm_router.chat(
-            [{"role": "user", "content": prompt}],
-            task="code",
-        )
+        with start_span(
+            "devops.analysis",
+            {
+                "workflow_id": workflow_id,
+                "session_id": session_id,
+                "agent_name": "devops_agent",
+            },
+        ):
+            chat_kwargs: dict[str, Any] = {}
+            if workflow_id or session_id:
+                chat_kwargs.update(
+                    workflow_id=workflow_id,
+                    session_id=session_id,
+                    agent_name="devops_agent",
+                    estimated_tokens=1800,
+                )
+            suggestion = await llm_router.chat(
+                [{"role": "user", "content": prompt}],
+                task="code",
+                **chat_kwargs,
+            )
         return {
             "success": True,
             "message": "DevOps analysis completed.",

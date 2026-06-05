@@ -1,0 +1,64 @@
+# OpenTelemetry Collector configuration
+# ======================================
+# Usage:
+#   docker run --rm -p 4317:4317 -p 4318:4318 \
+#     -v $(pwd)/infra/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml \
+#     otel/opentelemetry-collector-contrib:latest \
+#     --config=/etc/otel-collector-config.yaml
+#
+# Or add to docker-compose.yml (see docs/OBSERVABILITY.md for snippet).
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  # Drop spans that contain sensitive attribute keys
+  attributes:
+    actions:
+      - key: api_key
+        action: delete
+      - key: token
+        action: delete
+      - key: password
+        action: delete
+      - key: secret
+        action: delete
+
+  # Recommended: Prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1000
+    spike_limit_mib: 200
+
+exporters:
+  # Jaeger now natively supports OTLP (modern approach)
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Debug exporter for quick debugging
+  debug:
+    verbosity: detailed
+
+extensions:
+  health_check:
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [otlp/jaeger, debug]

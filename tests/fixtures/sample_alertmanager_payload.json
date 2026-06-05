@@ -1,0 +1,43 @@
+{
+  "version": "4",
+  "groupLabels": {
+    "alertname": "HighCPUUsage"
+  },
+  "commonLabels": {
+    "alertname": "HighCPUUsage",
+    "severity": "critical",
+    "service": "payment-service",
+    "namespace": "production",
+    "env": "prod"
+  },
+  "commonAnnotations": {
+    "summary": "High CPU usage detected on payment-service",
+    "description": "CPU usage has been above 90% for the last 5 minutes on payment-service in namespace production.",
+    "runbook_url": "https://wiki.example.com/runbooks/high-cpu"
+  },
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighCPUUsage",
+        "severity": "critical",
+        "service": "payment-service",
+        "namespace": "production",
+        "pod": "payment-service-abc-123",
+        "env": "prod"
+      },
+      "annotations": {
+        "summary": "High CPU usage detected on payment-service",
+        "description": "CPU usage has been above 90% for the last 5 minutes.",
+        "runbook_url": "https://wiki.example.com/runbooks/high-cpu"
+      },
+      "startsAt": "2026-06-05T10:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus:9090/graph?g0.expr=...",
+      "fingerprint": "abc123def456"
+    }
+  ],
+  "externalURL": "http://alertmanager:9093",
+  "receiver": "ai-agent-webhook",
+  "status": "firing"
+}

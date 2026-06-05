@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from shared.models import BrowserTask, BrowserResult
 from apps.browser.agent import BrowserAgent
+from shared.internal_auth import add_internal_auth_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+add_internal_auth_middleware(app)
 
 # Global agent instance
 _browser_agent: BrowserAgent = None
